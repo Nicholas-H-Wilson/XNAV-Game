@@ -144,6 +144,30 @@ def build_topdown_figure(data: dict) -> go.Figure:
             name="Pulsars",
         ))
 
+    # Particle cloud (subsampled to top-500 by weight for rendering performance)
+    particle_pos = data.get("particle_pos")
+    particle_weights = data.get("particle_weights")
+    if particle_pos is not None and len(particle_pos) > 1:
+        part = np.asarray(particle_pos)
+        wts = np.asarray(particle_weights) if particle_weights is not None else np.ones(len(part))
+        # Subsample: top 500 particles by weight
+        n_show = min(500, len(part))
+        top_idx = np.argsort(wts)[-n_show:]
+        wts_show = wts[top_idx]
+        wts_show = wts_show / wts_show.max() if wts_show.max() > 0 else wts_show
+        fig.add_trace(go.Scatter(
+            x=part[top_idx, 0], y=part[top_idx, 1],
+            mode="markers",
+            marker=dict(
+                size=3,
+                color=f"rgba(0,212,255,0.18)",
+                opacity=0.5,
+            ),
+            hoverinfo="skip",
+            showlegend=False,
+            name="_particles",
+        ))
+
     # Uncertainty circle around estimated position
     theta_u = np.linspace(0, 2 * np.pi, 200)
     fig.add_trace(go.Scatter(

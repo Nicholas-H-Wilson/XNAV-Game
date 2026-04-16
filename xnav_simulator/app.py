@@ -184,6 +184,58 @@ with col_status:
 
 st.divider()
 
+# ── Onboarding expander ───────────────────────────────────────────────────────
+if st.session_state.filter is None:
+    with st.expander("❓ What is this? — click to learn how it works", expanded=True):
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.markdown(
+                f'<div style="background:#111128; border:1px solid #1A1A3A; '
+                f'padding:12px; border-radius:6px; height:100%;">'
+                f'<p style="color:{COLOUR_ACCENT}; font-weight:bold; margin:0 0 6px 0;">'
+                f'🛸 The Cold Start Problem</p>'
+                f'<p style="color:#AAAACC; font-size:0.85em; margin:0;">'
+                f'Your spacecraft is somewhere in the Milky Way. No GPS. No ground contact. '
+                f'No prior position fix. The only navigation tool is an X-ray detector '
+                f'pointed at millisecond pulsars — the most precise natural clocks in the universe.</p>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        with col_b:
+            st.markdown(
+                f'<div style="background:#111128; border:1px solid #1A1A3A; '
+                f'padding:12px; border-radius:6px; height:100%;">'
+                f'<p style="color:{COLOUR_ACCENT}; font-weight:bold; margin:0 0 6px 0;">'
+                f'📡 How it works</p>'
+                f'<p style="color:#AAAACC; font-size:0.85em; margin:0;">'
+                f'<b style="color:#CCC;">Stage 1</b> — Dispersion measure constrains your region.<br>'
+                f'<b style="color:#CCC;">Stage 2</b> — Profile matching identifies which pulsars you see.<br>'
+                f'<b style="color:#CCC;">Stage 3</b> — Line-of-sight geometry triangulates position.<br>'
+                f'<b style="color:#CCC;">Stage 4</b> — Phase timing resolves the clock offset.<br>'
+                f'A <b style="color:#CCC;">particle filter</b> fuses all of this into a converging '
+                f'position estimate.</p>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        with col_c:
+            st.markdown(
+                f'<div style="background:#111128; border:1px solid #1A1A3A; '
+                f'padding:12px; border-radius:6px; height:100%;">'
+                f'<p style="color:{COLOUR_ACCENT}; font-weight:bold; margin:0 0 6px 0;">'
+                f'🚀 Quick start</p>'
+                f'<p style="color:#AAAACC; font-size:0.85em; margin:0;">'
+                f'1. Choose a <b style="color:#CCC;">spacecraft preset</b> in the sidebar '
+                f'(or leave as Random deep space).<br>'
+                f'2. Click <b style="color:{COLOUR_ACCENT};">▶ RUN SIMULATION</b>.<br>'
+                f'3. Watch the particle cloud on the <b style="color:#CCC;">Galaxy Map</b> '
+                f'and <b style="color:#CCC;">Convergence</b> tabs contract toward the true position.<br>'
+                f'4. Explore the <b style="color:#CCC;">Timing</b> and '
+                f'<b style="color:#CCC;">Phase Resolution</b> tabs to see the physics.'
+                f'</p>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
@@ -464,6 +516,8 @@ def _build_sim_data(settings: dict) -> dict:
         "sun_pos_kpc": SUN_POS_KPC,
         "uncertainty_kpc": uncertainty,
         "blind_mode": blind_mode,
+        "particle_pos": particles_kpc if pf is not None and pf.initialised else None,
+        "particle_weights": weights if pf is not None and pf.initialised else None,
         # Convergence panel
         "particles_kpc": particles_kpc,
         "weights": weights,
@@ -598,7 +652,15 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
         )
     except RuntimeError as exc:
         st.session_state.running = False
-        st.error(f"Filter diverged at iteration {step}: {exc}")
+        st.error(
+            f"**Filter diverged at iteration {step}** — the particle cloud collapsed "
+            f"and could not be recovered.\n\n"
+            f"**To recover:** ↺ Reset, then try:\n"
+            f"- Increase *Integration time* (more signal → less noise)\n"
+            f"- Reduce *Timing noise multiplier*\n"
+            f"- Switch to *Quick Look* tier (fewer pulsars, faster convergence)\n"
+            f"- Try a different spacecraft preset"
+        )
         logger.error("Filter diverged: %s", exc)
         return
 
@@ -728,7 +790,14 @@ def _handle_run(settings: dict) -> None:
     elif preset == "Galactic centre region":
         sc = Spacecraft.at_galactic_centre(rng=rng)
     elif preset == "Void between spiral arms":
-        sc = Spacecraft.random_deep_space(rng=rng)   # approximation: same as random
+        # Inter-arm void: Perseus–Sagittarius gap at GL ~225°, ~10 kpc from Sun
+        sc = Spacecraft.from_galactic(
+            gl_deg=float(rng.uniform(210.0, 240.0)),
+            gb_deg=float(rng.uniform(-5.0, 5.0)),
+            distance_kpc=float(rng.uniform(8.0, 12.0)),
+        )
+        sc.velocity_kms = rng.normal(0.0, 20.0, size=3)   # low dispersion in void
+        sc.true_position_kpc = sc.position_kpc.copy()
     elif preset == "Manual (GL / GB / Distance)":
         sc = Spacecraft.from_galactic(
             settings["gl_manual"], settings["gb_manual"], settings["dist_manual"],
@@ -832,24 +901,51 @@ if pf is not None and pf.initialised:
     sc = st.session_state.spacecraft
     if sc is not None and not settings.get("blind_mode", False):
         err = float(np.linalg.norm(pos - sc.true_position_kpc))
-        error_str = f" | Error: **{err:.3f} kpc**"
-    st.markdown(
-        f'<div style="background:#111128; border:1px solid #1A1A3A; padding:8px 16px; '
-        f'border-radius:6px; font-size:0.82em; color:#AAAACC;">'
-        f'Best estimate: <b style="color:{COLOUR_ACCENT};">'
-        f'GL={gl:.1f}°, GB={gb:.1f}°, d={dist:.2f} kpc</b> '
-        f'(X={pos[0]:.2f}, Y={pos[1]:.2f}, Z={pos[2]:.2f} kpc) '
-        f'| σ=({std[0]:.2f}, {std[1]:.2f}, {std[2]:.2f}) kpc '
-        f'| Iteration: <b>{st.session_state.iteration}</b>'
-        f'{error_str}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+        error_str = f" | Error: <b>{err:.3f} kpc</b>"
+
+    footer_col, dl_col = st.columns([5, 1])
+    with footer_col:
+        st.markdown(
+            f'<div style="background:#111128; border:1px solid #1A1A3A; padding:8px 16px; '
+            f'border-radius:6px; font-size:0.82em; color:#AAAACC;">'
+            f'Best estimate: <b style="color:{COLOUR_ACCENT};">'
+            f'GL={gl:.1f}°, GB={gb:.1f}°, d={dist:.2f} kpc</b> '
+            f'(X={pos[0]:.2f}, Y={pos[1]:.2f}, Z={pos[2]:.2f} kpc) '
+            f'| σ=({std[0]:.2f}, {std[1]:.2f}, {std[2]:.2f}) kpc '
+            f'| Iteration: <b>{st.session_state.iteration}</b>'
+            f'{error_str}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with dl_col:
+        # Build CSV from history for download
+        import io
+        history_rows = st.session_state.history
+        if history_rows:
+            csv_lines = ["iteration,x_kpc,y_kpc,z_kpc,uncertainty_kpc,error_kpc,ess_pre"]
+            for h in history_rows:
+                p = h.get("pos_kpc", [0, 0, 0])
+                csv_lines.append(
+                    f"{h.get('step', 0)},"
+                    f"{p[0]:.4f},{p[1]:.4f},{p[2]:.4f},"
+                    f"{h.get('uncertainty_kpc', 0):.4f},"
+                    f"{h.get('error_kpc', 0):.4f},"
+                    f"{h.get('ess_pre', 0):.4f}"
+                )
+            csv_bytes = "\n".join(csv_lines).encode("utf-8")
+            st.download_button(
+                "⬇ Results (CSV)",
+                data=csv_bytes,
+                file_name="xnav_results.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 else:
     st.markdown(
         '<div style="background:#111128; border:1px solid #1A1A3A; padding:8px 16px; '
         'border-radius:6px; font-size:0.82em; color:#555;">'
-        'Position not yet estimated — run the simulation to begin.'
+        'Position not yet estimated — configure a scenario in the sidebar and click '
+        '<b>▶ RUN SIMULATION</b> to begin.'
         '</div>',
         unsafe_allow_html=True,
     )
