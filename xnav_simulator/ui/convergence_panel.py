@@ -275,11 +275,7 @@ def render_stage_status(stage_status: dict) -> None:
 
 def render(data: dict) -> None:
     """Render the full convergence panel in Streamlit."""
-    # 3D particle cloud
-    fig3d = build_particle_figure(data)
-    st.plotly_chart(fig3d, use_container_width=True)
-
-    # Playback scrubber
+    # Playback scrubber — shown first so it selects which frame to render
     history = data.get("history", [])
     if len(history) > 1:
         scrub_step = st.slider(
@@ -288,13 +284,15 @@ def render(data: dict) -> None:
             value=len(history) - 1,
             key="convergence_scrubber",
         )
-        # Show historical particle cloud at scrub_step if playback enabled
         hist_entry = history[scrub_step]
         if "particles_kpc" in hist_entry:
-            data_hist = dict(data, particles_kpc=hist_entry["particles_kpc"],
-                             weights=hist_entry.get("weights", data.get("weights")))
-            fig_hist = build_particle_figure(data_hist)
-            st.plotly_chart(fig_hist, use_container_width=True)
+            # Substitute historical frame into data so the single chart below uses it
+            data = dict(data, particles_kpc=hist_entry["particles_kpc"],
+                        weights=hist_entry.get("weights", data.get("weights")))
+
+    # 3D particle cloud (single chart — uses scrubbed history frame if selected)
+    fig3d = build_particle_figure(data)
+    st.plotly_chart(fig3d, use_container_width=True)
 
     # Uncertainty / ESS timeline
     fig_timeline = build_uncertainty_timeline_figure(data)

@@ -384,7 +384,7 @@ class ParticleFilter:
         los_dirs = np.empty((n_pulsars, 3), dtype=np.float64)
         for j, p in enumerate(active_pulsars):
             norm = np.linalg.norm(p.position_kpc)
-            los_dirs[j] = p.position_kpc / norm if norm > 1e-10 else np.array([1., 0., 0.])
+            los_dirs[j] = p.position_kpc / norm if norm > 1e-6 else np.array([1., 0., 0.])
 
         # ── Step 4: Build DM table (vectorised) ───────────────────────────────
         dm_table = self._build_dm_table(
@@ -438,13 +438,13 @@ class ParticleFilter:
         self.weights = raw_weights / weight_sum   # normalise
 
         # ── Step 8: ESS check (computed after normalisation) ──────────────────
-        ess = float(1.0 / np.sum(self.weights ** 2))
+        ess = float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
         ess_frac = ess / self.n_particles
 
         if ess_frac < ESS_RESAMPLE_THRESHOLD:
             logger.info("Step %d: ESS=%.0f (%.1f%%) — resampling.", self._step, ess, 100 * ess_frac)
             self._liu_west_resample()
-            ess = float(1.0 / np.sum(self.weights ** 2))
+            ess = float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
             ess_frac = ess / self.n_particles
 
         if ess_frac < ESS_REINJECT_THRESHOLD:
@@ -629,7 +629,9 @@ class ParticleFilter:
         self.particles[replace_idx, :3] = new_pos
         self.particles[replace_idx, 3:] = new_vel
         self.weights[replace_idx] = 1.0 / self.n_particles
-        self.weights /= self.weights.sum()   # renormalise
+        w_sum = self.weights.sum()
+        if w_sum > 0:
+            self.weights /= w_sum   # renormalise
 
     # ── Estimate extraction ────────────────────────────────────────────────────
 
@@ -683,12 +685,12 @@ class ParticleFilter:
         ESS = 1 / sum(w²).  At uniform weights: ESS = N → fraction = 1.0.
         At all weight on one particle: ESS = 1 → fraction = 1/N.
         """
-        ess_absolute = float(1.0 / np.sum(self.weights ** 2))
+        ess_absolute = float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
         return ess_absolute / self.n_particles
 
     def get_ess_absolute(self) -> float:
         """Return current ESS as an absolute count (0–n_particles)."""
-        return float(1.0 / np.sum(self.weights ** 2))
+        return float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
 
     # ── History and status ────────────────────────────────────────────────────
 

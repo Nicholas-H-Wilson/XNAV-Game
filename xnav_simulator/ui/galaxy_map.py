@@ -162,7 +162,7 @@ def build_topdown_figure(data: dict) -> go.Figure:
         fig.add_trace(go.Scatter(
             x=[tp[0]], y=[tp[1]],
             mode="markers",
-            marker=dict(size=10, color="rgba(255,255,255,0.4)", symbol="circle"),
+            marker=dict(size=10, color="rgba(255,100,100,0.6)", symbol="circle"),
             name="True position",
             hovertemplate="True: (%{x:.2f}, %{y:.2f}) kpc<extra></extra>",
         ))

@@ -152,9 +152,9 @@ def run(
             t_candidates = new_candidates
         # else: keep old candidates (this pulsar provides no additional constraint)
 
-        # Ambiguity window = half-range of surviving candidates
+        # Ambiguity window = full peak-to-peak range of surviving candidates
         if len(t_candidates) > 1:
-            window = float(t_candidates[-1] - t_candidates[0]) / 2.0
+            window = float(t_candidates[-1] - t_candidates[0])
         elif len(t_candidates) == 1:
             window = grid_step / 2.0
         else:
@@ -171,7 +171,7 @@ def run(
     # would weight by likelihood of each candidate given all timing data.
     if len(t_candidates) > 0:
         resolved = float(np.median(t_candidates))
-        window_final = float((t_candidates[-1] - t_candidates[0]) / 2.0) if len(t_candidates) > 1 else grid_step / 2.0
+        window_final = float(t_candidates[-1] - t_candidates[0]) if len(t_candidates) > 1 else grid_step / 2.0
     else:
         resolved = 0.0
         window_final = initial_window

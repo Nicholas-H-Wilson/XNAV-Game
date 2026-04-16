@@ -261,7 +261,12 @@ def render(data: dict) -> None:
         return
 
     pulsar_names = [p["name"] for p in pulsars]
-    default_name = data.get("selected_pulsar") or pulsar_names[0]
+    # Prefer persisted session_state selection over passed-in default
+    persisted = st.session_state.get("timing_pulsar_selector")
+    default_name = (
+        persisted if persisted in pulsar_names
+        else (data.get("selected_pulsar") or pulsar_names[0])
+    )
     if default_name not in pulsar_names:
         default_name = pulsar_names[0]
 

@@ -294,9 +294,10 @@ def _build_observations(
 
         dispersive = K_DM * dm_obs / (frequency_mhz ** 2)
 
-        # Timing noise
+        # Timing noise scales with sqrt(integration time) — radiometer equation
+        # sigma_t = sigma_baseline * sqrt(1 s / T_int)
         sigma_t = (p.timing_noise_ns * 1e-9 * timing_noise_scale
-                   / np.sqrt(max(1.0, 1000.0 / 1000.0)))
+                   / np.sqrt(max(t_int, 1.0)))
         noise_t = rng.normal(0.0, sigma_t)
 
         total = roemer + dispersive + noise_t
@@ -447,7 +448,11 @@ def _build_sim_data(settings: dict) -> dict:
 
     # Stage 4 results
     s4_res = st.session_state.stage_results.get("stage4", {})
-    window_history = s4_res.get("window_history", [])
+    # Convert list[tuple[n_pulsars, window_s]] → list[dict] for phase_panel
+    window_history_raw = s4_res.get("window_history", [])
+    window_history = [
+        {"n_pulsars": n, "window_s": w} for n, w in window_history_raw
+    ]
     clock_candidates = list(s4_res.get("candidate_times_s", []))
     clock_estimate = float(s4_res.get("resolved_clock_offset_s", 0.0))
 

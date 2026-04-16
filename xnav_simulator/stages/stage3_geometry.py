@@ -106,7 +106,7 @@ def run(
         psr_pos = np.asarray(pulsar.position_kpc)   # (3,)
 
         # Direction from pulsar toward Sun (normalised) — the LOS direction
-        sun_dir = -psr_pos / (np.linalg.norm(psr_pos) + 1e-12)   # (3,)
+        sun_dir = -psr_pos / (np.linalg.norm(psr_pos) + 1e-6)   # (3,)
 
         # Perpendicular distance of each particle from the ray through psr_pos
         # along sun_dir:
