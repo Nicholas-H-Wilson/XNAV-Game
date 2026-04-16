@@ -82,17 +82,24 @@ st.markdown(
     f"""
     <style>
       .stApp {{ background-color: {COLOUR_BG}; color: #CCCCDD; }}
+      .stTabs [data-baseweb="tab-list"] {{
+        border-bottom: 1px solid #1A1A3A;
+        gap: 4px;
+      }}
       .stTabs [data-baseweb="tab"] {{
         background-color: #111128;
         color: #888;
         border-radius: 4px 4px 0 0;
+        padding: 6px 16px;
+        font-size: 0.85em;
+        letter-spacing: 0.02em;
       }}
       .stTabs [aria-selected="true"] {{
         background-color: #1A1A3A;
         color: {COLOUR_ACCENT};
         border-bottom: 2px solid {COLOUR_ACCENT};
       }}
-      .stMetric label {{ color: {COLOUR_ACCENT} !important; }}
+      .stMetric label {{ color: #AAAACC !important; }}
       .stAlert {{ border-radius: 6px; }}
       footer {{ visibility: hidden; }}
     </style>
@@ -147,10 +154,10 @@ if "observed_timings" not in st.session_state:
 col_title, col_status = st.columns([4, 1])
 with col_title:
     st.markdown(
-        f'<h1 style="color:{COLOUR_ACCENT}; margin:0; font-size:1.6em;">'
+        f'<h1 style="color:{COLOUR_ACCENT}; margin:0; font-size:2em;">'
         "🛸 XNAV Cold Start Simulator</h1>"
-        '<p style="color:#666; font-size:0.8em; margin:0;">'
-        "X-ray pulsar navigation — galactic cold start demonstration</p>",
+        '<p style="color:#888; font-size:0.85em; margin:0;">'
+        "X-ray pulsar navigation — determine your position anywhere in the galaxy, from scratch</p>",
         unsafe_allow_html=True,
     )
 with col_status:
@@ -186,12 +193,12 @@ st.divider()
 
 # ── Onboarding expander ───────────────────────────────────────────────────────
 if st.session_state.filter is None:
-    with st.expander("❓ What is this? — click to learn how it works", expanded=True):
+    with st.expander("How XNAV navigation works — quick start guide", expanded=True):
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.markdown(
                 f'<div style="background:#111128; border:1px solid #1A1A3A; '
-                f'padding:12px; border-radius:6px; height:100%;">'
+                f'padding:12px; border-radius:6px; min-height:140px;">'
                 f'<p style="color:{COLOUR_ACCENT}; font-weight:bold; margin:0 0 6px 0;">'
                 f'🛸 The Cold Start Problem</p>'
                 f'<p style="color:#AAAACC; font-size:0.85em; margin:0;">'
@@ -204,7 +211,7 @@ if st.session_state.filter is None:
         with col_b:
             st.markdown(
                 f'<div style="background:#111128; border:1px solid #1A1A3A; '
-                f'padding:12px; border-radius:6px; height:100%;">'
+                f'padding:12px; border-radius:6px; min-height:140px;">'
                 f'<p style="color:{COLOUR_ACCENT}; font-weight:bold; margin:0 0 6px 0;">'
                 f'📡 How it works</p>'
                 f'<p style="color:#AAAACC; font-size:0.85em; margin:0;">'
@@ -220,7 +227,7 @@ if st.session_state.filter is None:
         with col_c:
             st.markdown(
                 f'<div style="background:#111128; border:1px solid #1A1A3A; '
-                f'padding:12px; border-radius:6px; height:100%;">'
+                f'padding:12px; border-radius:6px; min-height:140px;">'
                 f'<p style="color:{COLOUR_ACCENT}; font-weight:bold; margin:0 0 6px 0;">'
                 f'🚀 Quick start</p>'
                 f'<p style="color:#AAAACC; font-size:0.85em; margin:0;">'
@@ -844,10 +851,13 @@ if settings.get("reset_clicked"):
 # ── Advance simulation (one iteration per rerun while running=True) ───────────
 
 if st.session_state.running and st.session_state.filter is not None:
-    with st.spinner(
-        f"Iteration {st.session_state.iteration + 1} — "
-        f"please wait…"
-    ):
+    _MAX_ITER = 20
+    progress_frac = min(st.session_state.iteration / _MAX_ITER, 1.0)
+    st.progress(
+        progress_frac,
+        text=f"Iteration {st.session_state.iteration + 1} of ~{_MAX_ITER} — particle filter updating…",
+    )
+    with st.spinner(""):
         _run_one_phase5_pipeline(settings)
     if st.session_state.running:
         st.rerun()   # trigger next iteration
@@ -863,22 +873,22 @@ sim_data = _build_sim_data(settings)
 from ui import galaxy_map, timing_panel, convergence_panel, phase_panel, gravity_panel
 
 tab_names = [
+    "🎯 Convergence",
     "🌌 Galaxy Map",
     "📡 Timing & DM",
-    "🎯 Convergence",
     "⏱ Phase Resolution",
     "🌑 Gravity Well",
 ]
 tabs = st.tabs(tab_names)
 
 with tabs[0]:
-    galaxy_map.render(sim_data)
+    convergence_panel.render(sim_data)
 
 with tabs[1]:
-    timing_panel.render(sim_data)
+    galaxy_map.render(sim_data)
 
 with tabs[2]:
-    convergence_panel.render(sim_data)
+    timing_panel.render(sim_data)
 
 with tabs[3]:
     phase_panel.render(sim_data)
@@ -897,26 +907,28 @@ if pf is not None and pf.initialised:
     std = est["position_std_kpc"]
     from utils.coordinates import cartesian_to_galactic
     gl, gb, dist = cartesian_to_galactic(pos)
-    error_str = ""
     sc = st.session_state.spacecraft
+    err_val = None
     if sc is not None and not settings.get("blind_mode", False):
-        err = float(np.linalg.norm(pos - sc.true_position_kpc))
-        error_str = f" | Error: <b>{err:.3f} kpc</b>"
+        err_val = float(np.linalg.norm(pos - sc.true_position_kpc))
 
-    footer_col, dl_col = st.columns([5, 1])
-    with footer_col:
-        st.markdown(
-            f'<div style="background:#111128; border:1px solid #1A1A3A; padding:8px 16px; '
-            f'border-radius:6px; font-size:0.82em; color:#AAAACC;">'
-            f'Best estimate: <b style="color:{COLOUR_ACCENT};">'
-            f'GL={gl:.1f}°, GB={gb:.1f}°, d={dist:.2f} kpc</b> '
-            f'(X={pos[0]:.2f}, Y={pos[1]:.2f}, Z={pos[2]:.2f} kpc) '
-            f'| σ=({std[0]:.2f}, {std[1]:.2f}, {std[2]:.2f}) kpc '
-            f'| Iteration: <b>{st.session_state.iteration}</b>'
-            f'{error_str}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+    m1, m2, m3, m4, dl_col = st.columns([2, 2, 2, 2, 1])
+    with m1:
+        st.metric("Position (GL / GB)", f"{gl:.1f}° / {gb:.1f}°",
+                  help="Current best-estimate position in galactic coordinates")
+    with m2:
+        st.metric("Distance from Sun", f"{dist:.2f} kpc",
+                  help="Heliocentric distance to estimated spacecraft position")
+    with m3:
+        st.metric("Uncertainty (1σ)", f"{np.mean(std):.2f} kpc",
+                  help=f"σ = ({std[0]:.2f}, {std[1]:.2f}, {std[2]:.2f}) kpc per axis")
+    with m4:
+        if err_val is not None:
+            st.metric("Error vs truth", f"{err_val:.3f} kpc",
+                      help="Distance between estimate and true spacecraft position")
+        else:
+            st.metric("Iteration", str(st.session_state.iteration),
+                      help="Number of particle filter update steps completed")
     with dl_col:
         # Build CSV from history for download
         import io

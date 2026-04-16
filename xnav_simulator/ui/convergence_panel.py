@@ -146,7 +146,7 @@ def build_particle_figure(data: dict) -> go.Figure:
             text=f"Particle Cloud (showing {len(disp_particles):,}/{n_particles:,})",
             font=dict(color=_ACCENT, size=12), x=0.5,
         ),
-        height=380,
+        height=320,
         legend=dict(bgcolor="rgba(0,0,0,0.5)", font=dict(size=10)),
     )
     return fig
@@ -171,8 +171,8 @@ def build_uncertainty_timeline_figure(data: dict) -> go.Figure:
             title=dict(text="Uncertainty Timeline", font=dict(color=_ACCENT, size=12), x=0.5),
             height=240,
         ))
-        fig.add_annotation(text="Run simulation to see convergence history",
-                           showarrow=False, font=dict(color="#888"),
+        fig.add_annotation(text="▶  Run simulation to see convergence history",
+                           showarrow=False, font=dict(color="#AAAACC", size=13),
                            xref="paper", yref="paper", x=0.5, y=0.5)
         return fig
 
@@ -195,10 +195,11 @@ def build_uncertainty_timeline_figure(data: dict) -> go.Figure:
 
     # ESS pre-resample (right y-axis, colour-coded health)
     ess_colours = [_ess_colour(e) for e in ess_pre_vals]
+    latest_ess_colour = _ess_colour(ess_pre_vals[-1]) if ess_pre_vals else "#FFAA00"
     fig.add_trace(go.Scatter(
         x=steps, y=ess_pre_vals,
         mode="lines+markers",
-        line=dict(color="#FFAA00", width=1, dash="dot"),
+        line=dict(color=latest_ess_colour, width=1, dash="dot"),
         marker=dict(size=6, color=ess_colours),
         name="ESS pre-resample (fraction)",
         hovertemplate="Step %{x}: ESS=%{y:.3f}<extra></extra>",
@@ -256,33 +257,50 @@ def render_stage_status(stage_status: dict) -> None:
     for col, (key, label) in zip(cols, _STAGE_LABELS.items()):
         status = stage_status.get(key, "pending")
         bg_col, text_col, icon = status_colours.get(status, status_colours["pending"])
+        border_style = (
+            f"border:1px dashed #333"
+            if status == "pending"
+            else f"border:1px solid {bg_col}"
+        )
         with col:
             st.markdown(
-                f'<div style="background:{bg_col}22; border:1px solid {bg_col}; '
+                f'<div style="background:{bg_col}44; {border_style}; '
                 f'border-radius:6px; padding:8px; text-align:center;">'
                 f'<span style="color:{text_col}; font-size:1.4em;">{icon}</span><br>'
                 f'<span style="color:{text_col}; font-size:0.75em; font-weight:600;">'
                 f'{label.replace(chr(10), "<br>")}</span><br>'
-                f'<span style="color:#888; font-size:0.65em;">{status.upper()}</span>'
+                f'<span style="color:#888; font-size:0.65em;">{status.upper()}</span><br>'
+                f'<span style="color:#666; font-size:0.6em;">{_STAGE_DESCRIPTIONS[key]}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            if st.button("?", key=f"stage_info_{key}", help=_STAGE_DESCRIPTIONS[key]):
-                pass  # tooltip is in the help argument
 
 
 # ── Streamlit render ──────────────────────────────────────────────────────────
 
 def render(data: dict) -> None:
     """Render the full convergence panel in Streamlit."""
-    # Playback scrubber — shown first so it selects which frame to render
+    # Stage status row first — gives immediate context before the charts
+    st.markdown(
+        f'<p style="color:{_ACCENT}; font-size:0.8em; margin-top:0.2em; margin-bottom:0.4em;">'
+        f'STAGE STATUS</p>',
+        unsafe_allow_html=True,
+    )
+    render_stage_status(data.get("stage_status", {}))
+    st.markdown('<div style="margin-bottom:0.5em;"></div>', unsafe_allow_html=True)
+
+    # Playback scrubber — shown before chart so it controls which frame to render
     history = data.get("history", [])
     if len(history) > 1:
         scrub_step = st.slider(
-            "Playback iteration",
+            "Rewind particle cloud to iteration →",
             min_value=0, max_value=len(history) - 1,
             value=len(history) - 1,
             key="convergence_scrubber",
+        )
+        st.caption(
+            f"Showing iteration {scrub_step} of {len(history)-1} — "
+            f"drag left to replay convergence"
         )
         hist_entry = history[scrub_step]
         if "particles_kpc" in hist_entry:
@@ -297,10 +315,3 @@ def render(data: dict) -> None:
     # Uncertainty / ESS timeline
     fig_timeline = build_uncertainty_timeline_figure(data)
     st.plotly_chart(fig_timeline, use_container_width=True)
-
-    # Stage status row
-    st.markdown(
-        f'<p style="color:{_ACCENT}; font-size:0.8em; margin-top:0.5em;">STAGE STATUS</p>',
-        unsafe_allow_html=True,
-    )
-    render_stage_status(data.get("stage_status", {}))

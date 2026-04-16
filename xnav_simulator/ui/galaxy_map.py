@@ -168,30 +168,54 @@ def build_topdown_figure(data: dict) -> go.Figure:
             name="_particles",
         ))
 
-    # Uncertainty circle around estimated position
     theta_u = np.linspace(0, 2 * np.pi, 200)
+    has_estimate = data.get("particle_pos") is not None
+
+    if not has_estimate:
+        # No simulation run yet — show helpful annotation instead of a misleading estimate
+        fig.add_annotation(
+            text="▶  Run simulation to see position estimate",
+            showarrow=False,
+            font=dict(color="#AAAACC", size=13),
+            xref="paper", yref="paper", x=0.5, y=0.05,
+            bgcolor="rgba(17,17,40,0.8)",
+            bordercolor="#1A1A3A",
+            borderwidth=1,
+        )
+        fig.update_layout(
+            xaxis=dict(**_AXIS_STYLE, title="X (kpc)", range=[-16, 16]),
+            yaxis=dict(**_AXIS_STYLE, title="Y (kpc)", range=[-16, 16],
+                       scaleanchor="x", scaleratio=1),
+            legend=dict(bgcolor="rgba(0,0,0,0.5)", x=0.01, y=0.99, font=dict(size=10)),
+            height=420,
+        )
+        return fig
+
+    # True position — only in non-blind mode; rendered before estimate so estimate is on top
+    if not blind_mode and true_pos is not None:
+        tp = np.asarray(true_pos)
+        fig.add_trace(go.Scatter(
+            x=[tp[0]], y=[tp[1]],
+            mode="markers",
+            marker=dict(size=12, color="#FF4444", symbol="x", opacity=1.0,
+                        line=dict(width=2, color="#FF4444")),
+            name="True position",
+            showlegend=True,
+            hovertemplate="True: (%{x:.2f}, %{y:.2f}) kpc<extra></extra>",
+        ))
+
+    # Uncertainty circle (labelled for legend)
     fig.add_trace(go.Scatter(
         x=sc_pos[0] + uncertainty_kpc * np.cos(theta_u),
         y=sc_pos[1] + uncertainty_kpc * np.sin(theta_u),
         mode="lines",
         line=dict(color=f"rgba(0,212,255,0.3)", width=1, dash="dash"),
         hoverinfo="skip",
-        showlegend=False,
-        name="_uncertainty",
+        showlegend=True,
+        name=f"Uncertainty (1σ = {uncertainty_kpc:.1f} kpc)",
     ))
 
-    # True position (only in non-blind mode)
-    if not blind_mode and true_pos is not None:
-        tp = np.asarray(true_pos)
-        fig.add_trace(go.Scatter(
-            x=[tp[0]], y=[tp[1]],
-            mode="markers",
-            marker=dict(size=10, color="rgba(255,100,100,0.6)", symbol="circle"),
-            name="True position",
-            hovertemplate="True: (%{x:.2f}, %{y:.2f}) kpc<extra></extra>",
-        ))
-
-    # Spacecraft estimated position
+    # Spacecraft estimated position — added last so it renders on top
     fig.add_trace(go.Scatter(
         x=[sc_pos[0]], y=[sc_pos[1]],
         mode="markers",
@@ -235,6 +259,12 @@ def build_skymap_figure(data: dict) -> go.Figure:
     fig = go.Figure(layout=_dark_layout("Pulsar Sky Map (Galactic Coordinates)"))
 
     if not pulsars:
+        fig.add_annotation(
+            text="Pulsar catalogue loads when simulation starts",
+            showarrow=False,
+            font=dict(color="#888", size=13),
+            xref="paper", yref="paper", x=0.5, y=0.5,
+        )
         fig.update_layout(height=420)
         return fig
 

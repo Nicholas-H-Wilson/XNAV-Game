@@ -133,9 +133,9 @@ def build_phase_dials_figure(data: dict) -> go.Figure:
 
         fig.add_annotation(
             x=cx, y=cy - 0.44 * min(cell_w, cell_h),
-            text=p["name"],
+            text=p["name"][:8],
             showarrow=False,
-            font=dict(size=7, color="#AAAACC"),
+            font=dict(size=9, color="#AAAACC"),
             xref="paper", yref="paper",
         )
 
@@ -231,6 +231,18 @@ def build_ambiguity_timeline_figure(data: dict) -> go.Figure:
 
 def render(data: dict) -> None:
     """Render the phase panel: dials left, timeline right."""
+    iteration = data.get("iteration", 0)
+    if iteration < 6 and not data.get("stage4_complete"):
+        st.markdown(
+            f'<div style="background:#111128; border:1px solid #1A1A3A; border-radius:6px; '
+            f'padding:24px; text-align:center; color:#AAAACC;">'
+            f'Phase resolution runs at iteration 6. '
+            f'Current iteration: <b style="color:#00D4FF;">{iteration}</b> of ~20.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
     col1, col2 = st.columns([1, 1])
     with col1:
         fig_dials = build_phase_dials_figure(data)

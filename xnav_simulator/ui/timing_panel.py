@@ -106,8 +106,11 @@ def build_dispersive_sweep_figure(data: dict) -> go.Figure:
     fig.update_layout(
         xaxis=dict(**_AXIS_STYLE, title="Time offset (μs)"),
         yaxis=dict(**_AXIS_STYLE, title="Frequency (MHz)"),
-        height=220,
+        height=280,
     )
+    fig.update_traces(showscale=True,
+                      colorbar=dict(title="Intensity", thickness=8,
+                                    tickfont=dict(size=9, color="#888")))
     return fig
 
 
@@ -198,6 +201,11 @@ def build_dm_residual_figure(data: dict) -> go.Figure:
 
     if not pulsars or not dm_residuals:
         fig = go.Figure(layout=_dark_layout("Multi-Pulsar DM Residuals"))
+        fig.add_annotation(
+            text="DM residuals appear after the first simulation iteration",
+            showarrow=False, font=dict(color="#888", size=12),
+            xref="paper", yref="paper", x=0.5, y=0.5,
+        )
         fig.update_layout(height=200)
         return fig
 
@@ -257,7 +265,12 @@ def render(data: dict) -> None:
     """Render the full timing panel in Streamlit."""
     pulsars = data.get("pulsars", [])
     if not pulsars:
-        st.info("No pulsars loaded. Run simulation to populate timing data.")
+        st.markdown(
+            '<div style="background:#111128; border:1px solid #1A1A3A; border-radius:6px; '
+            'padding:24px; color:#AAAACC; text-align:center;">'
+            'Run the simulation to load pulsar timing data.</div>',
+            unsafe_allow_html=True,
+        )
         return
 
     pulsar_names = [p["name"] for p in pulsars]
@@ -271,11 +284,12 @@ def render(data: dict) -> None:
         default_name = pulsar_names[0]
 
     selected = st.selectbox(
-        "Pulsar",
+        "Select pulsar to inspect",
         pulsar_names,
         index=pulsar_names.index(default_name),
         key="timing_pulsar_selector",
     )
+    st.caption("Dispersive sweep and timing breakdown for the selected pulsar")
     data = dict(data, selected_pulsar=selected)
 
     fig_sweep = build_dispersive_sweep_figure(data)

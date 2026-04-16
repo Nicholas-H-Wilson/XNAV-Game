@@ -182,11 +182,11 @@ def build_reality_check_figure(data: dict) -> go.Figure:
     # Bars ordered largest → smallest per Appendix D.1
     # (DM turbulence always first — physically it dominates)
     labels = [
-        "DM turbulence (ISM)",
-        "Photon counting noise",
-        "Gravity signal (estimated)",
-        "Solar wind contribution",
-        "Pulsar timing noise floor",
+        "ISM DM turbulence",
+        "Photon noise",
+        "Gravity signal",
+        "Solar wind",
+        "Timing noise floor",
     ]
     values = [dm_turb_ns, photon_ns, gravity_ns, solar_ns, timing_ns]
     colours = ["#FF8800", "#FFCC00", _ACCENT, "#CC88FF", "#FF4444"]
@@ -200,7 +200,7 @@ def build_reality_check_figure(data: dict) -> go.Figure:
             font=dict(color=_ACCENT, size=13), x=0.5,
         ),
         height=280,
-        margin=dict(l=190, r=120, t=45, b=40),
+        margin=dict(l=130, r=100, t=45, b=40),
     ))
 
     fig.add_trace(go.Bar(
@@ -225,7 +225,8 @@ def build_reality_check_figure(data: dict) -> go.Figure:
                 f"(DM turbulence is {ratio:.0f}× larger)"
             ),
             xref="paper", yref="paper",
-            x=1.0, y=0.5,
+            x=0.98, y=0.5,
+            xanchor="right",
             showarrow=False,
             font=dict(size=9, color="#FF8800"),
             bgcolor="rgba(40,20,0,0.7)",
@@ -287,6 +288,15 @@ def build_roadmap_text(data: dict) -> str:
 
 def render(data: dict) -> None:
     """Render the full gravity panel in Streamlit."""
+    if data.get("particle_pos") is None:
+        st.markdown(
+            '<div style="background:#111128; border:1px solid #1A1A3A; '
+            'border-radius:6px; padding:24px; color:#AAAACC; text-align:center;">'
+            'Run the simulation to estimate the local gravitational potential.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
     phi = data.get("phi_m2s2", -2.0e11)
     phi_unc = data.get("phi_uncertainty", abs(phi) * 0.3)
 

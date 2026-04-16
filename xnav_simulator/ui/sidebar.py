@@ -61,9 +61,7 @@ def render() -> dict:
 
         tier_options = list(config.ACCURACY_TIERS.keys())
         tier_labels = [
-            f"{name}  —  ~{config.ACCURACY_TIERS[name]['expected_runtime_seconds']}s  "
-            f"({config.ACCURACY_TIERS[name]['n_pulsars']} pulsars, "
-            f"{config.ACCURACY_TIERS[name]['n_particles']:,} particles)"
+            f"{name}  (~{config.ACCURACY_TIERS[name]['expected_runtime_seconds']}s)"
             for name in tier_options
         ]
         tier_idx = st.radio(
@@ -75,15 +73,16 @@ def render() -> dict:
             ),
         )
         selected_tier = tier_options[tier_idx]
+        st.caption(config.ACCURACY_TIERS[selected_tier]["description"])
 
         st.markdown("**Spacecraft Position**")
         preset = st.selectbox("Preset scenario", _PRESETS, index=0)
 
         gl_manual = gb_manual = dist_manual = 0.0
         if preset == "Manual (GL / GB / Distance)":
-            gl_manual = st.slider("Galactic longitude GL (°)", 0.0, 360.0, 180.0, step=1.0)
-            gb_manual = st.slider("Galactic latitude GB (°)", -90.0, 90.0, 0.0, step=1.0)
-            dist_manual = st.slider("Distance from Sun (kpc)", 0.1, 30.0, 8.0, step=0.1)
+            gl_manual = st.number_input("Galactic longitude GL (°)", 0.0, 360.0, 180.0, step=1.0)
+            gb_manual = st.number_input("Galactic latitude GB (°)", -90.0, 90.0, 0.0, step=1.0)
+            dist_manual = st.number_input("Distance from Sun (kpc)", 0.1, 30.0, 8.0, step=0.1)
 
         st.divider()
 
@@ -115,51 +114,52 @@ def render() -> dict:
 
         st.divider()
 
-        # ── NOISE CONTROLS ──────────────────────────────────────────────────
-        st.subheader("NOISE CONTROLS")
-
-        timing_noise_on = st.toggle("Timing noise", value=True)
-        timing_noise_scale = 1.0
-        if timing_noise_on:
-            timing_noise_scale = st.slider(
-                "Timing noise multiplier", 0.1, 3.0, 1.0, step=0.1,
-                key="timing_noise_scale",
+        # ── ADVANCED SETTINGS (collapsed by default) ─────────────────────
+        with st.expander("Advanced settings", expanded=False):
+            st.markdown(
+                '<p style="color:#888; font-size:0.8em; margin:0 0 8px 0;">'
+                'Noise controls, environment, and display options. '
+                'Defaults work well for first runs.</p>',
+                unsafe_allow_html=True,
             )
 
-        photon_noise_on = st.toggle("Photon noise", value=True)
-        ism_turb_on = st.toggle("ISM turbulence", value=True)
-        ism_turb_scale = 1.0
-        if ism_turb_on:
-            ism_turb_scale = st.slider(
-                "ISM turbulence multiplier", 0.1, 3.0, 1.0, step=0.1,
-                key="ism_turb_scale",
+            st.subheader("NOISE CONTROLS")
+            timing_noise_on = st.toggle("Timing noise", value=True)
+            timing_noise_scale = 1.0
+            if timing_noise_on:
+                timing_noise_scale = st.slider(
+                    "Timing noise multiplier", 0.1, 3.0, 1.0, step=0.1,
+                    key="timing_noise_scale",
+                )
+
+            photon_noise_on = st.toggle("Photon noise", value=True)
+            ism_turb_on = st.toggle("ISM turbulence", value=True)
+            ism_turb_scale = 1.0
+            if ism_turb_on:
+                ism_turb_scale = st.slider(
+                    "ISM turbulence multiplier", 0.1, 3.0, 1.0, step=0.1,
+                    key="ism_turb_scale",
+                )
+            solar_wind = st.radio(
+                "Solar wind", ["Quiet", "Moderate", "Active"], index=1, horizontal=True,
             )
-        solar_wind = st.radio(
-            "Solar wind", ["Quiet", "Moderate", "Active"], index=1, horizontal=True,
-        )
 
-        st.divider()
+            st.divider()
+            st.subheader("ENVIRONMENT")
+            central_body_name = st.selectbox("Central body", list(_CENTRAL_BODIES.keys()))
+            central_body_mass_kg = _CENTRAL_BODIES[central_body_name]
+            include_galactic_potential = st.checkbox(
+                "Include galactic background potential", value=True,
+            )
 
-        # ── ENVIRONMENT ─────────────────────────────────────────────────────
-        st.subheader("ENVIRONMENT")
-
-        central_body_name = st.selectbox("Central body", list(_CENTRAL_BODIES.keys()))
-        central_body_mass_kg = _CENTRAL_BODIES[central_body_name]
-        include_galactic_potential = st.checkbox(
-            "Include galactic background potential", value=True,
-        )
-
-        st.divider()
-
-        # ── DISPLAY ─────────────────────────────────────────────────────────
-        st.subheader("DISPLAY")
-
-        blind_mode = st.toggle("Blind mode (hide true position)", value=False)
-        if blind_mode:
-            st.caption("🔒 True position hidden from all panels")
-        animation_speed = st.radio(
-            "Animation speed", ["Slow", "Normal", "Fast"], index=1, horizontal=True,
-        )
+            st.divider()
+            st.subheader("DISPLAY")
+            blind_mode = st.toggle("Blind mode (hide true position)", value=False)
+            if blind_mode:
+                st.caption("🔒 True position hidden from all panels")
+            animation_speed = st.radio(
+                "Animation speed", ["Slow", "Normal", "Fast"], index=1, horizontal=True,
+            )
 
         st.divider()
 
@@ -169,9 +169,11 @@ def render() -> dict:
             type="primary",
             use_container_width=True,
         )
+        st.markdown('<div style="margin-top:4px;"></div>', unsafe_allow_html=True)
         reset_clicked = st.button(
-            "↺  RESET",
+            "↺  Reset",
             use_container_width=True,
+            help="Clear all simulation state and start over",
         )
 
     return {
