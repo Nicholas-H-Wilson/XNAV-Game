@@ -1247,3 +1247,79 @@ so the ONLY signal is the Roemer delay (~1×10¹¹ s/kpc).  With sigma_total
 ~10 μs, particle discriminability is ~10 pm — far below kpc initial uncertainty.
 The ISM grid's DM gradient (~5–10 pc cm⁻³/kpc) is the primary cold-start signal.
 Timing noise becomes dominant only at the final sub-pc convergence phase.
+
+---
+
+## Appendix D — Phase 5 Amendments (Integration)
+
+### D.1 Gravity Panel Test Spec Correction (CRITICAL)
+
+The build brief at line 952 specifies:
+  "Assert gravity signal < timing noise floor (it should be — this is the point)"
+
+This assertion is **physically wrong** at T = 1000 s integration and must not be
+used in the Phase 6 gravity panel implementation or any future test.
+
+Correct physics at T = 1000 s:
+
+  gravity signal  = |Φ/c²| × T ≈ 340 μs
+  timing noise    = σ_ns / sqrt(T) ≈ 3 ns       (100 ns MSP, 1000 s integration)
+  DM turbulence   = K_DM × 0.15 × DM / f²  ≈ 16 ms  (DM=50 pc cm⁻³, 1400 MHz)
+
+  Ordering: timing_noise << gravity << photon_noise << DM_turbulence
+
+The gravity signal is NOT undetectable because it is below timing noise — it is
+five orders of magnitude ABOVE timing noise at 1000 s integration.
+
+The gravity signal is undetectable because ISM DM turbulence (~16 ms) is ~46×
+larger than the gravity signal (~340 μs).  DM turbulence produces a
+quasi-monopolar timing offset (correlated across pulsars through shared
+line-of-sight ISM structure) that cannot be distinguished from the gravitational
+redshift signature with current ISM models.
+
+The Phase 6 gravity panel reality check bar chart MUST:
+1. Show DM turbulence as the dominant noise bar (not timing noise)
+2. Label the annotation: "Gravity signal undetectable — buried under ISM DM turbulence"
+3. NOT assert or imply that gravity is below the timing noise floor
+
+The correct test assertion (implemented in test_phase5.py Test 4) is:
+  assert gravity_signal < dm_noise_floor    # ~340 μs << 16 ms  PASS
+  assert gravity_signal > timing_noise_floor  # ~340 μs >> 3 ns  PASS
+
+### D.2 LOS Convention — Filter-Consistent Observation Generation
+
+The timing model (timing.py) computes Roemer delay using:
+  los_dir = (pulsar_pos - sc_pos) / |pulsar_pos - sc_pos|   (spacecraft → pulsar)
+
+The particle filter kernel computes:
+  los_dir = pulsar_pos / |pulsar_pos|                        (origin → pulsar)
+
+These differ by up to ~30° for spacecraft at ~8 kpc galactocentric radius.
+The mismatch creates a systematic Roemer residual at the true particle position
+of ~10¹¹ s — orders of magnitude above sigma_total (~10 μs) — making all
+particles equally bad and preventing convergence.
+
+For integration tests (and for the UI simulation loop), synthetic observations
+MUST be generated using the same LOS convention as the filter.  Use:
+  los_dir = pulsar_pos / |pulsar_pos|   (origin → pulsar)
+for both observation generation and the particle filter kernel.
+
+This is implemented in test_phase5.py via `_build_observed_timings()`.
+The app.py simulation loop must follow the same convention.
+
+### D.3 ESS = 1.0 After Resampling is Correct
+
+In the Roemer-dominated regime (sigma_total ~ 10 μs, Roemer discrimination
+~10¹¹ s/kpc), weight collapse to a single particle after every update is
+physically correct.  Liu-West resampling immediately fires, restoring uniform
+weights — post-resampling ESS = 1.0.
+
+Do not treat ESS = 1.0 as a filter health warning in this regime.
+The ESS health thresholds (green/amber/red) in the convergence panel apply to
+the PRE-resampling ESS, not the post-resampling ESS.
+The UI should display: "ESS before resample: X / N_particles" as the health metric.
+
+The primary kpc-scale convergence signal is DM (from the ISM grid and Stage 1
+probability map), not the Roemer-driven weight updates.  Stage 1 initialises
+particles in the correct galactic region (~few kpc radius); the DM gradient
+then narrows the estimate per iteration.
