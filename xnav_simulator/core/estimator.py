@@ -53,6 +53,8 @@ from config import (
     SUN_POS_KPC,
 )
 
+from core.galaxy import Galaxy   # top-level import — no circular risk (galaxy.py has no estimator import)
+
 if TYPE_CHECKING:
     from core.interstellar_medium import InterstellarMedium
     from core.pulsar import Pulsar
@@ -597,7 +599,6 @@ class ParticleFilter:
         # The RegularGridInterpolator returns fill_value=1.0 outside the grid,
         # so escaped particles would get wrong DM predictions.  Clipping here
         # is cheaper than letting them propagate through the filter.
-        from core.galaxy import Galaxy
         for i in range(self.n_particles):
             if not Galaxy.in_galaxy(new_particles[i, :3]):
                 new_particles[i, :3] = Galaxy.clip_to_galaxy(new_particles[i, :3])

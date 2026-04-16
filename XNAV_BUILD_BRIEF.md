@@ -1323,3 +1323,50 @@ The primary kpc-scale convergence signal is DM (from the ISM grid and Stage 1
 probability map), not the Roemer-driven weight updates.  Stage 1 initialises
 particles in the correct galactic region (~few kpc radius); the DM gradient
 then narrows the estimate per iteration.
+
+## Appendix E — Phase 6 Amendments (UI)
+
+### E.1 — run_all_tests.py is Phase 7 Step 1 (mandatory)
+
+The master runner must import and execute all six test modules (test_phase1 through
+test_phase6) in order, print a summary table, and exit with code 0 if all pass.
+This is the primary customer-facing deliverable for the testing subsystem.
+
+### E.2 — History must store per-iteration particle snapshots
+
+In `app.py._run_one_phase5_pipeline()`, the history dict entry must include:
+  - `particles_kpc`: pf.particles[:, :3].copy()
+  - `weights`: pf.weights.copy()
+
+Without this, the convergence panel playback scrubber is inert (the historical
+cloud branch in convergence_panel.py never fires).
+
+Memory cost at Balanced tier: 5000 particles × 3 floats × 20 iterations ≈ 1.2 MB.
+Acceptable.
+
+This fix was applied at the end of Phase 6 (before Phase 7 begins).
+
+### E.3 — LOS lines on galaxy map (Phase 7 cosmetic polish)
+
+Add `go.Scatter` traces from `sc_pos` to each identified pulsar position,
+coloured by `confidence` on a green-to-amber scale, opacity 0.25.
+These are cosmetic but specified in the brief.
+
+### E.4 — Dispersive sweep before/after toggle (Phase 7)
+
+Add a `st.radio("Display mode", ["Before correction", "After correction", "Overlay"])`
+widget in `timing_panel.render()`. "After correction" zeroes out the per-channel
+delay (collapses the diagonal sweep to a vertical stripe).
+
+### E.5 — Stage 2 illustrative label in UI (Phase 7)
+
+Under Stage 2's convergence panel status box, display:
+  "Profile matching (illustrative — real profiles would use EPN database)"
+when stage2 status is "complete".
+
+### E.6 — Void preset differentiation (Phase 7)
+
+The "Void between spiral arms" preset currently maps to random deep space.
+A void position should be at galactocentric radius 10–14 kpc within ±5° of
+the disk plane. Either implement `Spacecraft.in_interarm_void()` or document
+in the UI that the void preset uses the random deep-space placement.

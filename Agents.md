@@ -180,7 +180,7 @@ Capture any brief amendments before proceeding.
 | Phase 3 — Estimation | ✅ Complete | 12/12 | See Appendix C in brief for amendments |
 | Phase 4 — Stage Logic | ✅ Complete | 13/13 | |
 | Phase 5 — Integration | ✅ Complete | 5/5 | See Appendix D in brief for amendments |
-| Phase 6 — UI | ⏳ Pending | — | |
+| Phase 6 — UI | ✅ Complete | 10/10 | See Appendix E in brief for amendments |
 | Phase 7 — Final | ⏳ Pending | — | |
 
 ---
