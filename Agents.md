@@ -178,7 +178,7 @@ Capture any brief amendments before proceeding.
 | Phase 1 — Foundation | ✅ Complete | 16/16 | |
 | Phase 2 — Physics | ✅ Complete | 34/34 | See Appendix A in brief for amendments |
 | Phase 3 — Estimation | ✅ Complete | 12/12 | See Appendix C in brief for amendments |
-| Phase 4 — Stage Logic | ⏳ Pending | — | |
+| Phase 4 — Stage Logic | ✅ Complete | 13/13 | |
 | Phase 5 — Integration | ⏳ Pending | — | |
 | Phase 6 — UI | ⏳ Pending | — | |
 | Phase 7 — Final | ⏳ Pending | — | |
