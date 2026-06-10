@@ -253,6 +253,8 @@ def render_stage_status(stage_status: dict) -> None:
         "pending": ("#555555", "grey", "◯"),
         "running": ("#FF8800", "#FF8800", "◉"),
         "complete": ("#00CC66", "#00CC66", "✓"),
+        "skipped": ("#888844", "#BBBB66", "⊘"),
+        "failed": ("#FF4444", "#FF4444", "✗"),
     }
     for col, (key, label) in zip(cols, _STAGE_LABELS.items()):
         status = stage_status.get(key, "pending")

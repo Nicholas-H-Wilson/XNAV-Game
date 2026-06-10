@@ -149,7 +149,7 @@ class NoiseModel:
 
         # Convert DM fluctuation to timing residual at the observation frequency
         # Δt = K_DM × ΔDM / f²  (in seconds if K_DM in MHz² pc⁻¹ cm³ s)
-        delta_t = K_DM * delta_dm / (frequency_mhz ** 2)
+        delta_t = K_DM * delta_dm / (max(frequency_mhz, 1.0) ** 2)
 
         return float(delta_t)
 

@@ -1,0 +1,2 @@
+{"ts": 1781122720.114402, "run_id": "20260610_201840", "event": "run_start", "tier": "Balanced (40 pulsars)", "n_pulsars": 40, "preset": "Random deep space (default)"}
+{"ts": 1781122723.3677166, "run_id": "20260610_201840", "event": "iteration", "step": 0, "error_kpc": 1.34651436371802, "ess": 1.0}

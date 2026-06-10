@@ -191,6 +191,29 @@ with col_status:
 
 st.divider()
 
+# ── Helper: reset simulation state ───────────────────────────────────────────
+
+def _do_reset() -> None:
+    """Reset all mutable simulation state in session_state."""
+    if st.session_state.filter is not None:
+        st.session_state.filter.reset()
+    st.session_state.filter = None
+    st.session_state.spacecraft = None
+    st.session_state.pulsars = []
+    st.session_state.history = []
+    st.session_state.iteration = 0
+    st.session_state.running = False
+    st.session_state.stage_status = {
+        "stage1": "pending", "stage2": "pending",
+        "stage3": "pending", "stage4": "pending",
+    }
+    st.session_state.stage_results = {}
+    st.session_state.dm_residuals = {}
+    st.session_state.observed_timings = {}
+    st.session_state.sim_logger = SimLogger()
+    logger.info("Simulation reset.")
+
+
 # ── Onboarding expander ───────────────────────────────────────────────────────
 if st.session_state.filter is None:
     with st.expander("How XNAV navigation works — quick start guide", expanded=True):
@@ -267,22 +290,7 @@ if st.session_state.pending_reset:
     if col_confirm.button("✓ Confirm reset", type="primary", key="confirm_reset"):
         st.session_state.pending_reset = False
         st.session_state.current_tier = st.session_state.staged_tier
-        # Reset sim state inline (can't call _do_reset() before it's defined)
-        if st.session_state.filter is not None:
-            st.session_state.filter.reset()
-        st.session_state.filter = None
-        st.session_state.spacecraft = None
-        st.session_state.pulsars = []
-        st.session_state.history = []
-        st.session_state.iteration = 0
-        st.session_state.running = False
-        st.session_state.stage_status = {
-            "stage1": "pending", "stage2": "pending",
-            "stage3": "pending", "stage4": "pending",
-        }
-        st.session_state.stage_results = {}
-        st.session_state.dm_residuals = {}
-        st.session_state.observed_timings = {}
+        _do_reset()
         st.rerun()
     if col_cancel.button("✗ Cancel", key="cancel_reset"):
         st.session_state.pending_reset = False
@@ -291,110 +299,10 @@ if st.session_state.pending_reset:
 
 
 # ── Helper: build observed timings (filter-consistent LOS convention) ─────────
+# Shared with tests/run_convergence_study.py — see core/observations.py for the
+# forward model and the Appendix D.2 LOS convention notes.
 
-def _build_observations(
-    pulsars: list,
-    sc_pos: np.ndarray,
-    ism,
-    frequency_mhz: float = 1400.0,
-    rng: np.random.Generator | None = None,
-    timing_noise_scale: float = 1.0,
-    ism_turb_scale: float = 1.0,
-) -> tuple[dict, dict]:
-    """Generate synthetic arrival times using los = pulsar_pos / |pulsar_pos|.
-
-    CRITICAL (Appendix D.2): This function MUST use the origin→pulsar LOS
-    convention, NOT spacecraft→pulsar.  The particle filter kernel uses the
-    same convention, so the true particle has exactly zero Roemer residual.
-
-    Using TimingModel.compute_arrival_time() (spacecraft→pulsar convention)
-    would create a ~10^11 s Roemer mismatch → no convergence.
-
-    Returns
-    -------
-    observed_timings: dict {name: {"total": float, "geometric": float,
-                                   "dispersive": float}}
-    dm_values:        dict {name: observed DM (pc cm⁻³)}
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    observed_timings: dict = {}
-    dm_values: dict = {}
-    _SUN = SUN_POS_KPC
-
-    for p in pulsars:
-        # LOS: origin → pulsar (filter-consistent convention)
-        norm_p = np.linalg.norm(p.position_kpc)
-        if norm_p < 1e-10:
-            los = np.array([1.0, 0.0, 0.0])
-        else:
-            los = p.position_kpc / norm_p
-
-        # Roemer delay: projection of sc_pos onto LOS direction (seconds)
-        roemer = -float(np.dot(sc_pos, los)) * KPC_TO_M / C_LIGHT
-
-        # DM from ISM model at midpoint between SC and pulsar
-        mid = (sc_pos + p.position_kpc) / 2.0
-        if ism is not None and ism.grid_loaded():
-            dm_at_mid = float(ism.batch_lookup(mid.reshape(1, 3))[0])
-        else:
-            dm_at_mid = p.dm
-
-        # Scale DM by path length relative to heliocentric distance
-        helio_dist = max(float(np.linalg.norm(mid - _SUN)), 0.1)
-        path_kpc = float(np.linalg.norm(p.position_kpc - sc_pos))
-        dm_obs = max(dm_at_mid / helio_dist * path_kpc, 0.5)
-
-        # DM turbulence noise (ISM floor, 15%)
-        if ism_turb_scale > 0:
-            dm_turb = rng.normal(0.0, dm_obs * 0.15 * ism_turb_scale)
-            dm_obs += dm_turb
-
-        dispersive = K_DM * dm_obs / (frequency_mhz ** 2)
-
-        # Timing noise scales with sqrt(integration time) — radiometer equation
-        # sigma_t = sigma_baseline * sqrt(1 s / T_int)
-        sigma_t = (p.timing_noise_ns * 1e-9 * timing_noise_scale
-                   / np.sqrt(max(t_int, 1.0)))
-        noise_t = rng.normal(0.0, sigma_t)
-
-        total = roemer + dispersive + noise_t
-
-        observed_timings[p.name] = {
-            "total": total,
-            "geometric": roemer,
-            "dispersive": dispersive,
-            "roemer_s": roemer,
-            "dispersive_s": dispersive,
-            "timing_noise_s": noise_t,
-        }
-        dm_values[p.name] = dm_obs
-
-    return observed_timings, dm_values
-
-
-# ── Helper: reset simulation state ───────────────────────────────────────────
-
-def _do_reset() -> None:
-    """Reset all mutable simulation state in session_state."""
-    if st.session_state.filter is not None:
-        st.session_state.filter.reset()
-    st.session_state.filter = None
-    st.session_state.spacecraft = None
-    st.session_state.pulsars = []
-    st.session_state.history = []
-    st.session_state.iteration = 0
-    st.session_state.running = False
-    st.session_state.stage_status = {
-        "stage1": "pending", "stage2": "pending",
-        "stage3": "pending", "stage4": "pending",
-    }
-    st.session_state.stage_results = {}
-    st.session_state.dm_residuals = {}
-    st.session_state.observed_timings = {}
-    st.session_state.sim_logger = SimLogger()
-    logger.info("Simulation reset.")
+from core.observations import build_observations as _build_observations
 
 
 # ── Helper: initialise catalogue and ISM (once per session) ──────────────────
@@ -615,6 +523,7 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
         rng=rng,
         timing_noise_scale=timing_scale,
         ism_turb_scale=ism_scale,
+        integration_time_s=t_int,
     )
     st.session_state.observed_timings = obs_timings
 
@@ -647,7 +556,9 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
         else:
             pf.initialise_from_region(sc.true_position_kpc, 10.0)
 
-        st.session_state.stage_status["stage1"] = "complete"
+        st.session_state.stage_status["stage1"] = (
+            "complete" if s1_result is not None else "failed"
+        )
 
     # ── Particle filter update ────────────────────────────────────────────────
     try:
@@ -708,10 +619,11 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
         try:
             s2_result = stage2_profile_matching.run(obs_profiles, pulsars)
             st.session_state.stage_results["stage2"] = s2_result
+            st.session_state.stage_status["stage2"] = "complete"
         except Exception as exc:
             logger.warning("Stage 2 failed: %s", exc)
             st.session_state.stage_results["stage2"] = {"identifications": [], "n_identified": 0}
-        st.session_state.stage_status["stage2"] = "complete"
+            st.session_state.stage_status["stage2"] = "failed"
 
     # ── Stage 3: Geometry (at step 3, after Stage 2) ──────────────────────────
     if step == 3 and "stage3" not in st.session_state.stage_results:
@@ -722,13 +634,18 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
                     if r.get("best_match")}
         identified_pulsars = [p for p in pulsars if p.name in id_names]
         if not identified_pulsars:
-            identified_pulsars = pulsars[:6]   # fallback if none identified
-        try:
-            s3_result = stage3_geometry.run(identified_pulsars, pf)
-            st.session_state.stage_results["stage3"] = s3_result
-        except Exception as exc:
-            logger.warning("Stage 3 failed: %s", exc)
-        st.session_state.stage_status["stage3"] = "complete"
+            # No identified pulsars → skip Stage 3 rather than triangulating
+            # with arbitrary (possibly misidentified) pulsars.
+            logger.warning("Stage 3 skipped: no pulsars identified by Stage 2.")
+            st.session_state.stage_status["stage3"] = "skipped"
+        else:
+            try:
+                s3_result = stage3_geometry.run(identified_pulsars, pf)
+                st.session_state.stage_results["stage3"] = s3_result
+                st.session_state.stage_status["stage3"] = "complete"
+            except Exception as exc:
+                logger.warning("Stage 3 failed: %s", exc)
+                st.session_state.stage_status["stage3"] = "failed"
 
     # ── Stage 4: Phase ambiguity (at step 6, or convergence, once only) ───────
     if (step >= 6 and "stage4" not in st.session_state.stage_results):
@@ -739,22 +656,24 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
                     if r.get("best_match")}
         identified_pulsars = [p for p in pulsars if p.name in id_names]
         if not identified_pulsars:
-            identified_pulsars = pulsars[:6]
-
-        arrival_times = {p.name: obs_timings[p.name]["total"]
-                         for p in identified_pulsars
-                         if p.name in obs_timings}
-        try:
-            s4_result = stage4_phase_ambiguity.run(
-                identified_pulsars,
-                arrival_times,
-                est["position_kpc"],
-                true_clock_offset_s=sc.clock_offset_s,
-            )
-            st.session_state.stage_results["stage4"] = s4_result
-        except Exception as exc:
-            logger.warning("Stage 4 failed: %s", exc)
-        st.session_state.stage_status["stage4"] = "complete"
+            logger.warning("Stage 4 skipped: no pulsars identified by Stage 2.")
+            st.session_state.stage_status["stage4"] = "skipped"
+        else:
+            arrival_times = {p.name: obs_timings[p.name]["total"]
+                             for p in identified_pulsars
+                             if p.name in obs_timings}
+            try:
+                s4_result = stage4_phase_ambiguity.run(
+                    identified_pulsars,
+                    arrival_times,
+                    est["position_kpc"],
+                    true_clock_offset_s=sc.clock_offset_s,
+                )
+                st.session_state.stage_results["stage4"] = s4_result
+                st.session_state.stage_status["stage4"] = "complete"
+            except Exception as exc:
+                logger.warning("Stage 4 failed: %s", exc)
+                st.session_state.stage_status["stage4"] = "failed"
 
     # ── Convergence check ─────────────────────────────────────────────────────
     max_iterations = 20

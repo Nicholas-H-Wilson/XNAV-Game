@@ -34,6 +34,7 @@ _PHASES = [
     ("Phase 4 — Stage Logic",   "test_phase4", "13/13"),
     ("Phase 5 — Integration",   "test_phase5", " 5/5"),
     ("Phase 6 — UI",            "test_phase6", "10/10"),
+    ("Phase 8 — App smoke",     "test_app_smoke", "4/4"),
 ]
 
 

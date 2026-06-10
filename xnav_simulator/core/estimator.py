@@ -454,7 +454,7 @@ class ParticleFilter:
                 self._step, ess, 100 * ess_frac, n_reinject,
             )
             self._reinject_diversity(n_reinject)
-            ess = float(1.0 / np.sum(self.weights ** 2))
+            ess = float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
             ess_frac = ess / self.n_particles
             self._consecutive_low_ess += 1
         else:

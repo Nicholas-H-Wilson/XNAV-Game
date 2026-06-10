@@ -88,9 +88,12 @@ python -c "
 import warnings; warnings.filterwarnings('ignore')
 import sys; sys.path.insert(0, '$(dirname "$APP")')
 try:
-    from core.estimator import _systematic_resample_nb
+    from core.estimator import _log_likelihoods_jit
     import numpy as np
-    _systematic_resample_nb(np.ones(10)/10)
+    _log_likelihoods_jit(
+        np.zeros((4, 3)), np.eye(3)[:2], np.ones((4, 2)),
+        np.zeros(2), np.ones(2), 1.0, 1.0, 1.0, 1400.0,
+    )
     print('  Numba warm-up: OK')
 except Exception as e:
     print(f'  Numba warm-up skipped: {e}')

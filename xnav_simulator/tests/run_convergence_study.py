@@ -46,33 +46,23 @@ from stages import (
 )
 
 
-# ── Synthetic observation helper (mirrors app.py _build_observations) ─────────
+# ── Synthetic observation helper ───────────────────────────────────────────────
+# Exactly the same forward model app.py uses — shared via core/observations.py
+# so the study measures what the app actually does.
+
+from core.observations import build_observations
+
 
 def _build_observations(pulsars, sc_pos, ism, freq_mhz=1400.0, rng=None,
                          timing_scale=1.0, ism_scale=1.0, t_int=1000.0):
-    if rng is None:
-        rng = np.random.default_rng()
-    from core.timing import TimingModel
-    from core.noise import TimingNoise
-    obs_timings = {}
-    dm_vals = {}
-    for p in pulsars:
-        los_dir = p.position_kpc / (np.linalg.norm(p.position_kpc) + 1e-9)
-        roemer_s = TimingModel.roemer_delay(sc_pos, los_dir)
-        disp_s = TimingModel.dispersive_delay(p.dm, freq_mhz)
-        noise_s = (TimingNoise.timing_noise(p.timing_noise_ns, timing_scale)
-                   / np.sqrt(max(t_int, 1.0)))
-        ism_dm_actual = ism.interpolate_dm(sc_pos, p.position_kpc)
-        ism_turb_s = K_DM * 0.15 * ism_dm_actual * ism_scale / (freq_mhz ** 2)
-        ism_turb_s *= rng.normal(1.0, 0.1)
-        total_s = roemer_s + disp_s + noise_s + ism_turb_s
-        obs_timings[p.name] = {
-            "total": total_s, "roemer_s": roemer_s,
-            "dispersive_s": disp_s, "timing_noise_s": noise_s,
-            "dm_turbulence_s": ism_turb_s,
-        }
-        dm_vals[p.name] = ism_dm_actual
-    return obs_timings, dm_vals
+    return build_observations(
+        pulsars, sc_pos, ism,
+        frequency_mhz=freq_mhz,
+        rng=rng,
+        timing_noise_scale=timing_scale,
+        ism_turb_scale=ism_scale,
+        integration_time_s=t_int,
+    )
 
 
 # ── Single run ─────────────────────────────────────────────────────────────────
@@ -122,6 +112,7 @@ def run_one(seed: int, pulsars, ism, tier_cfg: dict,
 
     converge_threshold_kpc = 2.0
     max_iterations = 20
+    id_pulsars: list = []
 
     for step in range(max_iterations):
         iter_rng = np.random.default_rng(seed + step * 100)
@@ -160,7 +151,7 @@ def run_one(seed: int, pulsars, ism, tier_cfg: dict,
             result["iterations"] = step
             return result
 
-        # Stage 2 (step 3)
+        # Stage 2 (step 3) — mirror app.py: skip Stages 3/4 when nothing identified
         if step == 3:
             obs_profiles = [p.generate_profile() for p in pulsars]
             try:
@@ -169,18 +160,19 @@ def run_one(seed: int, pulsars, ism, tier_cfg: dict,
                 result["n_identified"] = s2.get("n_identified", 0)
                 id_names = {r.get("best_match") for r in s2.get("identifications", [])
                             if r.get("best_match")}
-                id_pulsars = [p for p in pulsars if p.name in id_names] or pulsars[:6]
+                id_pulsars = [p for p in pulsars if p.name in id_names]
             except Exception:
-                id_pulsars = pulsars[:6]
+                id_pulsars = []
 
-            try:
-                stage3_geometry.run(id_pulsars, pf)
-                result["stage3_ok"] = True
-            except Exception:
-                pass
+            if id_pulsars:
+                try:
+                    stage3_geometry.run(id_pulsars, pf)
+                    result["stage3_ok"] = True
+                except Exception:
+                    pass
 
         # Stage 4 (step 6)
-        if step == 6:
+        if step == 6 and id_pulsars:
             try:
                 arrival_times = {p.name: obs_timings[p.name]["total"]
                                  for p in id_pulsars if p.name in obs_timings}
@@ -231,8 +223,10 @@ def main():
 
     cat = Catalogue()
     pulsars = cat.get_top_n(tier_cfg["n_pulsars"])
-    ism = InterstellarMedium()
-    ism.build_grid(pulsars)
+    ism = InterstellarMedium()   # loads data/ne2001_grid.npz automatically
+    if not ism.grid_loaded():
+        print("\n  WARNING: DM grid not loaded — catalogue DMs carry no position"
+              " signal; convergence will be poor.")
     print(f" done ({time.monotonic()-t0:.1f}s, {len(pulsars)} pulsars)")
 
     presets = ["random", "near_sun", "gc", "void"]
@@ -242,7 +236,8 @@ def main():
         print(f"\n  Preset: {preset}")
         preset_results = []
         for i in range(args.n):
-            seed = args.seed + i * 13 + hash(preset) % 1000
+            # Stable per-preset offset (hash() is salted per process — not reproducible)
+            seed = args.seed + i * 13 + sum(ord(c) for c in preset) % 1000
             t_run = time.monotonic()
             r = run_one(seed, pulsars, ism, tier_cfg, preset=preset)
             elapsed = time.monotonic() - t_run
