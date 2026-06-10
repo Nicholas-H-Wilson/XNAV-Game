@@ -173,7 +173,14 @@ with col_status:
         if pf.diverged:
             status_text, status_col = "⚠ DIVERGED", "#FF4444"
         else:
-            status_text, status_col = "✓ CONVERGED", "#00CC66"
+            # Blind-mode safe: judge convergence on the filter's own
+            # uncertainty, not the true error.
+            _est = pf.get_estimate()
+            _unc = float(np.mean(_est["position_std_kpc"]))
+            if _unc < config.CONVERGE_UNCERTAINTY_KPC:
+                status_text, status_col = "✓ CONVERGED", "#00CC66"
+            else:
+                status_text, status_col = "△ NOT CONVERGED", "#FFAA00"
         st.markdown(
             f'<div style="background:{status_col}33; color:{status_col}; '
             f'padding:4px 12px; border-radius:20px; text-align:center; '
@@ -397,12 +404,14 @@ def _build_sim_data(settings: dict) -> dict:
     pulsar_dicts = []
     stage2_res = st.session_state.stage_results.get("stage2", {})
     identifications = stage2_res.get("identifications", [])
-    id_names = {r.get("best_match") for r in identifications
-                if r.get("best_match")}
+    # best_match holds Pulsar objects (or None) — see stage2 docstring
+    id_names = {r["best_match"].name for r in identifications
+                if r.get("best_match") is not None}
     for p in pulsars:
         ident = p.name in id_names
         conf = next((r.get("confidence", 0.0) for r in identifications
-                     if r.get("best_match") == p.name), 0.0)
+                     if r.get("best_match") is not None
+                     and r["best_match"].name == p.name), 0.0)
         pulsar_dicts.append({
             "name": p.name, "dm": p.dm, "period": p.period,
             "distance_kpc": p.distance_kpc, "gl": p.gl, "gb": p.gb,
@@ -598,6 +607,7 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
         "error_kpc": error_kpc,
         "ess_pre": ess_pre,
         "ess_post": 1.0,   # post-resample ESS always ~1.0 (Appendix D.3)
+        "beta": getattr(pf, "last_beta", 1.0),   # tempering exponent this step
         "particles_kpc": pf.particles[:, :3].copy(),   # for convergence panel playback
         "weights": pf.weights.copy(),
     })
@@ -629,9 +639,10 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
     if step == 3 and "stage3" not in st.session_state.stage_results:
         st.session_state.stage_status["stage3"] = "running"
         s2_res = st.session_state.stage_results.get("stage2", {})
-        identifications = s2_res.get("identifications", [])
-        id_names = {r.get("best_match") for r in identifications
-                    if r.get("best_match")}
+        # best_match holds Pulsar objects (or None) — see stage2 docstring
+        id_names = {r["best_match"].name
+                    for r in s2_res.get("identifications", [])
+                    if r.get("best_match") is not None}
         identified_pulsars = [p for p in pulsars if p.name in id_names]
         if not identified_pulsars:
             # No identified pulsars → skip Stage 3 rather than triangulating
@@ -651,9 +662,9 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
     if (step >= 6 and "stage4" not in st.session_state.stage_results):
         st.session_state.stage_status["stage4"] = "running"
         s2_res = st.session_state.stage_results.get("stage2", {})
-        identifications = s2_res.get("identifications", [])
-        id_names = {r.get("best_match") for r in identifications
-                    if r.get("best_match")}
+        id_names = {r["best_match"].name
+                    for r in s2_res.get("identifications", [])
+                    if r.get("best_match") is not None}
         identified_pulsars = [p for p in pulsars if p.name in id_names]
         if not identified_pulsars:
             logger.warning("Stage 4 skipped: no pulsars identified by Stage 2.")
@@ -676,13 +687,25 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
                 st.session_state.stage_status["stage4"] = "failed"
 
     # ── Convergence check ─────────────────────────────────────────────────────
+    # Blind-mode safe: judged on the filter's own uncertainty (never the true
+    # error).  Stop once the uncertainty is small AND has plateaued (< 10%
+    # improvement over the last 3 iterations) — stopping on the threshold
+    # alone would cut the convergence story short on easy scenarios.
     max_iterations = 20
-    converge_threshold_kpc = 2.0
-    if error_kpc < converge_threshold_kpc or step >= max_iterations:
+    uncertainty_kpc = float(np.mean(est["position_std_kpc"]))
+    hist = st.session_state.history
+    plateaued = (
+        len(hist) >= 4
+        and uncertainty_kpc > 0.9 * float(hist[-4]["uncertainty_kpc"])
+    )
+    if (uncertainty_kpc < config.CONVERGE_UNCERTAINTY_KPC and plateaued) \
+            or step >= max_iterations:
         st.session_state.running = False
         logger.info(
-            "Simulation complete at step %d: error=%.3f kpc, ess=%.3f",
-            step, error_kpc, ess_pre,
+            "Simulation complete at step %d: uncertainty=%.3f kpc, "
+            "error=%.3f kpc, ess=%.3f, beta=%.3g",
+            step, uncertainty_kpc, error_kpc, ess_pre,
+            getattr(pf, "last_beta", float("nan")),
         )
 
     st.session_state.iteration += 1
@@ -716,14 +739,8 @@ def _handle_run(settings: dict) -> None:
     elif preset == "Galactic centre region":
         sc = Spacecraft.at_galactic_centre(rng=rng)
     elif preset == "Void between spiral arms":
-        # Inter-arm void: Perseus–Sagittarius gap at GL ~225°, ~10 kpc from Sun
-        sc = Spacecraft.from_galactic(
-            gl_deg=float(rng.uniform(210.0, 240.0)),
-            gb_deg=float(rng.uniform(-5.0, 5.0)),
-            distance_kpc=float(rng.uniform(8.0, 12.0)),
-        )
-        sc.velocity_kms = rng.normal(0.0, 20.0, size=3)   # low dispersion in void
-        sc.true_position_kpc = sc.position_kpc.copy()
+        # Inter-arm void per Appendix E.6: galactocentric R 10–14 kpc, in-disk
+        sc = Spacecraft.interarm_void(rng=rng)
     elif preset == "Manual (GL / GB / Distance)":
         sc = Spacecraft.from_galactic(
             settings["gl_manual"], settings["gb_manual"], settings["dist_manual"],

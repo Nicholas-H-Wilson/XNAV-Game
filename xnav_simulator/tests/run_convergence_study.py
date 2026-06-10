@@ -82,11 +82,7 @@ def run_one(seed: int, pulsars, ism, tier_cfg: dict,
     elif preset == "gc":
         sc = Spacecraft.at_galactic_centre(rng=rng)
     elif preset == "void":
-        sc = Spacecraft.from_galactic(
-            gl_deg=float(rng.uniform(210.0, 240.0)),
-            gb_deg=float(rng.uniform(-5.0, 5.0)),
-            distance_kpc=float(rng.uniform(8.0, 12.0)),
-        )
+        sc = Spacecraft.interarm_void(rng=rng)
     else:
         sc = Spacecraft.random_deep_space(rng=rng)
 
@@ -158,8 +154,10 @@ def run_one(seed: int, pulsars, ism, tier_cfg: dict,
                 s2 = stage2_profile_matching.run(obs_profiles, pulsars)
                 result["stage2_ok"] = True
                 result["n_identified"] = s2.get("n_identified", 0)
-                id_names = {r.get("best_match") for r in s2.get("identifications", [])
-                            if r.get("best_match")}
+                # best_match holds Pulsar objects (or None) — see stage2 docstring
+                id_names = {r["best_match"].name
+                            for r in s2.get("identifications", [])
+                            if r.get("best_match") is not None}
                 id_pulsars = [p for p in pulsars if p.name in id_names]
             except Exception:
                 id_pulsars = []

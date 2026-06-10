@@ -49,8 +49,10 @@ from config import (
     K_DM,
     KPC_TO_M,
     LIU_WEST_H,
+    LIU_WEST_MIN_KERNEL_KPC,
     REINJECT_FRACTION,
     SUN_POS_KPC,
+    TEMPER_TARGET_ESS,
 )
 
 from core.galaxy import Galaxy   # top-level import — no circular risk (galaxy.py has no estimator import)
@@ -208,6 +210,9 @@ class ParticleFilter:
         self._consecutive_low_ess: int = 0
         self._diverged: bool = False
         self._history: list[FilterState] = []
+        # Tempering exponent applied at the most recent update (0 = no update
+        # yet, 1 = observations fully assimilated).  See TEMPER_TARGET_ESS.
+        self.last_beta: float = 0.0
 
         logger.info(
             "ParticleFilter allocated: %d particles, seed=%d", n_particles, seed
@@ -421,11 +426,23 @@ class ParticleFilter:
             float(frequency_mhz),
         )
 
-        # ── Step 7: Log-sum-exp stabilisation → normalise weights ──────────────
+        # ── Step 7: Adaptive tempering → normalise weights ─────────────────────
         # Subtract max before exp() to prevent underflow.  This preserves the
         # relative probabilities exactly since the normalisation constant cancels.
+        #
+        # The raw likelihood is astronomically peaked relative to a kpc-scale
+        # cloud (Roemer residual differences ~10¹¹ s vs sigma ~ms), so applying
+        # it at full strength is an argmax: all weight lands on the single
+        # nearest particle, resampling duplicates it, and the Liu-West kernel
+        # (proportional to the now-zero covariance) can never restore diversity
+        # — the filter freezes after one update.  Tempering raises the
+        # likelihood to a power beta ∈ (0, 1] chosen so the post-update ESS
+        # stays near TEMPER_TARGET_ESS; each iteration then contracts the cloud
+        # by a controlled amount and beta climbs to 1 as the cloud tightens.
         log_w -= log_w.max()
-        raw_weights = np.exp(log_w)
+        beta = self._adaptive_beta(log_w)
+        self.last_beta = beta
+        raw_weights = np.exp(beta * log_w)
         weight_sum = raw_weights.sum()
         if weight_sum <= 0 or not np.isfinite(weight_sum):
             logger.warning(
@@ -441,8 +458,14 @@ class ParticleFilter:
         ess = float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
         ess_frac = ess / self.n_particles
 
-        if ess_frac < ESS_RESAMPLE_THRESHOLD:
-            logger.info("Step %d: ESS=%.0f (%.1f%%) — resampling.", self._step, ess, 100 * ess_frac)
+        # Resample whenever the update was tempered (beta < 1 means the cloud
+        # is still contracting and needs fresh diversity for the next step) or
+        # the ESS dropped below threshold.
+        if beta < 1.0 or ess_frac < ESS_RESAMPLE_THRESHOLD:
+            logger.info(
+                "Step %d: ESS=%.0f (%.1f%%), beta=%.3g — resampling.",
+                self._step, ess, 100 * ess_frac, beta,
+            )
             self._liu_west_resample()
             ess = float(1.0 / max(np.sum(self.weights ** 2), 1e-12))
             ess_frac = ess / self.n_particles
@@ -484,6 +507,44 @@ class ParticleFilter:
         )
 
         return state
+
+    # ── Adaptive tempering ─────────────────────────────────────────────────────
+
+    def _adaptive_beta(self, log_w: np.ndarray) -> float:
+        """Choose tempering exponent beta ∈ (0, 1] by bisection on the ESS.
+
+        Finds the largest beta ≤ 1 such that the effective sample size of
+        weights ∝ exp(beta · log_w) is at least TEMPER_TARGET_ESS × N.
+        ESS(beta) is monotonically decreasing in beta, so bisection converges.
+
+        log_w must already be max-subtracted (max(log_w) == 0).
+        """
+        def ess_frac_at(beta: float) -> float:
+            w = np.exp(beta * log_w)
+            s = w.sum()
+            if s <= 0 or not np.isfinite(s):
+                return 0.0
+            w /= s
+            return float(1.0 / np.sum(w ** 2)) / self.n_particles
+
+        if ess_frac_at(1.0) >= TEMPER_TARGET_ESS:
+            return 1.0   # likelihood already gentle — assimilate fully
+
+        # Log-weight spreads can reach ~10²⁶ (Roemer residuals across a kpc
+        # cloud vs ms-scale sigma), so beta must be searched in log space —
+        # linear bisection over [0, 1] cannot resolve beta ~ 10⁻²⁶.
+        lo_exp, hi_exp = -40.0, 0.0   # beta = 10^exp
+        if ess_frac_at(10.0 ** lo_exp) < TEMPER_TARGET_ESS:
+            # Pathologically peaked even at beta=1e-40; apply the minimum.
+            return 10.0 ** lo_exp
+        for _ in range(80):   # resolves exponent to ~5e-13 decades
+            mid_exp = 0.5 * (lo_exp + hi_exp)
+            if ess_frac_at(10.0 ** mid_exp) >= TEMPER_TARGET_ESS:
+                lo_exp = mid_exp
+            else:
+                hi_exp = mid_exp
+        # Largest tested beta still meeting the ESS target.
+        return 10.0 ** lo_exp
 
     # ── DM table construction (vectorised) ────────────────────────────────────
 
@@ -585,6 +646,11 @@ class ParticleFilter:
         diff = self.particles - mean   # (N, 6)
         weighted_var = np.average(diff ** 2, weights=self.weights, axis=0)   # (6,)
         kernel_std = h * np.sqrt(np.maximum(weighted_var, 1e-12))            # (6,)
+        # Roughening floor on position jitter: if the weighted covariance
+        # underflows (near-duplicate particles), the kernel would add nothing
+        # and the cloud freezes permanently.  1 pc keeps duplicates apart
+        # without affecting kpc-scale convergence.
+        kernel_std[:3] = np.maximum(kernel_std[:3], LIU_WEST_MIN_KERNEL_KPC)
 
         # Systematic resampling (lower variance than multinomial)
         indices = _systematic_resample(self.weights, self._rng)
@@ -749,6 +815,7 @@ class ParticleFilter:
         self._consecutive_low_ess = 0
         self._diverged = False
         self._history = []
+        self.last_beta = 0.0
         logger.info("ParticleFilter reset (seed=%d).", _seed)
 
 

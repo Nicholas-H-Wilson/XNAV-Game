@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
 
 from config import G_NEWTON, M_SUN, KPC_TO_M
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -81,24 +84,58 @@ class Spacecraft:
 
     @classmethod
     def random_deep_space(cls, rng: Optional[np.random.Generator] = None) -> "Spacecraft":
-        """Create a spacecraft at a random deep-space galactic position."""
+        """Create a spacecraft at a random deep-space galactic position.
+
+        Samples directly in galactocentric cylindrical coordinates so the
+        position is always inside the modelled disk (R < GALAXY_RADIUS_KPC,
+        |Z| < GALAXY_THICKNESS_KPC/2).  The previous heliocentric (l, b, d)
+        sampling could place the craft up to ~5 kpc above the disk plane and
+        beyond the disk edge — outside both the galaxy model and the DM grid,
+        where observations carry no usable navigation signal.
+        """
         if rng is None:
             rng = np.random.default_rng()
 
         from config import GALAXY_RADIUS_KPC, GALAXY_THICKNESS_KPC
-        from utils.coordinates import galactic_to_cartesian
 
-        # Uniform random in galactic (l, b, d) — within the disk
-        gl = rng.uniform(0.0, 360.0)
-        gb = rng.uniform(-20.0, 20.0)      # stay near galactic plane
-        dist = rng.uniform(1.0, GALAXY_RADIUS_KPC - 1.0)
+        # Uniform over the disk area (sqrt for areal uniformity), inside edges
+        r_gc = (GALAXY_RADIUS_KPC - 1.0) * np.sqrt(rng.uniform(0.0, 1.0))
+        r_gc = max(r_gc, 1.0)
+        phi = rng.uniform(0.0, 2.0 * np.pi)
+        z = rng.uniform(-0.9, 0.9) * GALAXY_THICKNESS_KPC / 2.0
 
-        pos = galactic_to_cartesian(gl, gb, dist)
+        pos = np.array([r_gc * np.cos(phi), r_gc * np.sin(phi), z])
         vel = rng.normal(0.0, 30.0, size=3)   # typical galactic dispersion ~30 km/s
 
         return cls(
             position_kpc=pos,
             velocity_kms=vel,
+            clock_offset_s=rng.normal(0.0, 1e-4),
+            true_position_kpc=pos.copy(),
+        )
+
+    @classmethod
+    def interarm_void(cls, rng: Optional[np.random.Generator] = None) -> "Spacecraft":
+        """Create a spacecraft in the void between spiral arms.
+
+        Per build brief Appendix E.6: galactocentric radius 10–14 kpc, within
+        the disk plane.  Low electron density and low stellar density — the
+        hardest realistic navigation environment inside the disk.
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+
+        from config import GALAXY_THICKNESS_KPC
+
+        r_gc = rng.uniform(10.0, 14.0)
+        phi = rng.uniform(0.0, 2.0 * np.pi)
+        z = rng.uniform(-0.8, 0.8) * GALAXY_THICKNESS_KPC / 2.0
+
+        pos = np.array([r_gc * np.cos(phi), r_gc * np.sin(phi), z])
+
+        return cls(
+            position_kpc=pos,
+            velocity_kms=rng.normal(0.0, 20.0, size=3),   # low dispersion in void
             clock_offset_s=rng.normal(0.0, 1e-4),
             true_position_kpc=pos.copy(),
         )
@@ -132,17 +169,22 @@ class Spacecraft:
 
     @classmethod
     def at_galactic_centre(cls, rng: Optional[np.random.Generator] = None) -> "Spacecraft":
-        """Create a spacecraft near the galactic centre region."""
+        """Create a spacecraft near the galactic centre region.
+
+        Samples galactocentrically (0.5–3 kpc from the GC, in the disk).  The
+        previous version sampled 0.5–3 kpc from the *Sun* toward GL≈0°, which
+        left the craft 5–8 kpc from the actual centre.
+        """
         if rng is None:
             rng = np.random.default_rng()
 
-        from utils.coordinates import galactic_to_cartesian
+        from config import GALAXY_THICKNESS_KPC
 
-        gl = rng.uniform(355.0, 365.0) % 360.0
-        gb = rng.uniform(-5.0, 5.0)
-        dist = rng.uniform(0.5, 3.0)   # kpc from Sun, near GC direction
+        r_gc = rng.uniform(0.5, 3.0)
+        phi = rng.uniform(0.0, 2.0 * np.pi)
+        z = rng.uniform(-0.8, 0.8) * GALAXY_THICKNESS_KPC / 2.0
 
-        pos = galactic_to_cartesian(gl, gb, dist)
+        pos = np.array([r_gc * np.cos(phi), r_gc * np.sin(phi), z])
 
         return cls(
             position_kpc=pos,
@@ -162,10 +204,21 @@ class Spacecraft:
         blind_mode: bool = False,
         **kwargs,
     ) -> "Spacecraft":
-        """Create a spacecraft from explicit galactic coordinates."""
+        """Create a spacecraft from explicit galactic coordinates.
+
+        Positions outside the modelled galactic disk are allowed (the position
+        is the user's to choose) but logged: the galaxy model and DM grid only
+        cover the disk, so navigation signal degrades sharply out there.
+        """
+        from core.galaxy import Galaxy
         from utils.coordinates import galactic_to_cartesian
 
         pos = galactic_to_cartesian(gl_deg, gb_deg, distance_kpc)
+        if not Galaxy.in_galaxy(pos):
+            logger.warning(
+                "Position %s kpc is outside the modelled galactic disk; "
+                "DM navigation signal will be degraded there.", np.round(pos, 2),
+            )
         if velocity_kms is None:
             velocity_kms = np.zeros(3)
 

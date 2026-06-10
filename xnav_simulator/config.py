@@ -38,6 +38,23 @@ ESS_RESAMPLE_THRESHOLD = 0.5   # fraction of n_particles → trigger resampling
 ESS_REINJECT_THRESHOLD = 0.1   # fraction of n_particles → trigger reinjection
 REINJECT_FRACTION = 0.2        # fraction of particles to reinject
 
+# Adaptive likelihood tempering.  Pulsar timing likelihoods are astronomically
+# peaked relative to a kpc-scale particle cloud (Roemer residual differences
+# ~10¹¹ s vs sigma ~ms): applied at full strength they collapse the cloud onto
+# a single particle in one update.  Each update therefore scales the
+# log-likelihoods by beta ∈ (0, 1], chosen by bisection so the post-update ESS
+# stays near this target fraction.  Beta rises to 1 as the cloud contracts,
+# giving genuine gradual convergence over iterations.
+TEMPER_TARGET_ESS = 0.5
+
+# Roughening floor on Liu-West position jitter (kpc, = 1 pc).  Prevents the
+# cloud freezing into exact duplicates if the weighted covariance underflows.
+LIU_WEST_MIN_KERNEL_KPC = 1e-3
+
+# Simulation-level convergence criterion: mean marginal position std (kpc).
+# Blind-mode safe — uses the filter's own uncertainty, never the true error.
+CONVERGE_UNCERTAINTY_KPC = 2.0
+
 # Covariance regularisation nugget — prevents singular covariance matrices
 # when particles are near-degenerate (well below physical uncertainty scales).
 COV_NUGGET: float = 1e-6
