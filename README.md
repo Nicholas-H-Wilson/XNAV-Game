@@ -120,12 +120,14 @@ streamlit run xnav_simulator/app.py
 | plotly | ≥5.20 | Interactive charts |
 | numba | ≥0.59 | JIT-compiled particle filter |
 | astropy | ≥6.0 | Coordinate transforms |
-| psrqpy | ≥1.2 | ATNF pulsar catalogue access |
-| pygedm | ≥1.1 | NE2001/YMW16 ISM DM model |
 | pandas | ≥2.2 | Data handling |
 
-First run downloads the ATNF pulsar catalogue (~5 MB) and caches it locally — internet
-connection required for the very first launch only.
+The app is fully offline: the repo bundles an ATNF pulsar catalogue snapshot
+(`data/atnf_cache.json`, 103 millisecond pulsars) and a precomputed YMW16 DM grid
+(`data/ne2001_grid.npz`, 200 pc resolution). Two **optional** packages are only
+needed to regenerate that data: `psrqpy` (live ATNF refresh) and `pygedm`
+(YMW16 electron-density model; requires a C/Fortran toolchain including `f2c`
+to compile, which is why it is not a hard dependency).
 
 ---
 
@@ -149,7 +151,9 @@ particle cloud contract on the **Convergence** and **Galaxy Map** tabs.
 The status indicator (top right) shows:
 - ◯ **NOT STARTED** — ready to run
 - ● **RUNNING** — iteration in progress
-- ✓ **CONVERGED** — error < 2 kpc
+- ✓ **CONVERGED** — filter uncertainty < 2 kpc (judged on the filter's own
+  uncertainty, never the true position — so it works in blind mode too)
+- △ **NOT CONVERGED** — run ended with uncertainty above the threshold
 - ⚠ **DIVERGED** — filter collapsed (try resetting and increasing integration time)
 
 ### 3. Read the results
@@ -188,8 +192,16 @@ progress prompts for confirmation before resetting.
 - Solar galactocentric distance: R₀ = 8.178 kpc (GRAVITY Collaboration 2019)
 - Timing noise: σ_TOA ∝ 1/√T_int (radiometer equation)
 - Liu-West kernel bandwidth h = 0.1; ESS threshold for resampling = 50%
-- ISM DM model: NE2001 / YMW16 via pygedm, smoothed to grid
+- Adaptive likelihood tempering: each update is raised to a power β chosen by
+  log-space bisection so the post-update ESS stays near 50% — pulsar timing
+  likelihoods are ~10²⁶× sharper than a kpc-scale cloud, and applying them
+  untempered collapses the filter onto one particle in a single step
+- ISM DM model: YMW16 via pygedm, precomputed to a 200 pc galactocentric grid
+  with a 15% log-normal turbulence field baked in
 - Roemer delay uses filter-consistent LOS convention (origin → pulsar)
+- Phase ambiguity (Stage 4) operates on clock-only residuals: resolving the
+  integer pulse count requires position knowledge of order c×P (~hundreds of
+  km), so it illustrates the final refinement after the position fix
 
 ---
 
@@ -204,11 +216,15 @@ XNAV-Game/
 │   ├── requirements.txt
 │   ├── core/
 │   │   ├── catalogue.py          # ATNF pulsar catalogue wrapper
-│   │   ├── estimator.py          # Liu-West particle filter
+│   │   ├── estimator.py          # Liu-West particle filter (adaptive tempering)
+│   │   ├── observations.py       # Synthetic observation forward model (shared)
 │   │   ├── spacecraft.py         # Spacecraft state and factory presets
 │   │   ├── timing.py             # Timing model (Roemer, dispersive, noise)
 │   │   ├── dispersion.py         # Solar wind + ISM DM models
-│   │   ├── interstellar_medium.py # NE2001/YMW16 DM grid
+│   │   ├── interstellar_medium.py # YMW16 DM grid (precompute + lookup)
+│   │   ├── galaxy.py             # Disk geometry, uniform/map sampling
+│   │   ├── noise.py              # Timing/DM noise models
+│   │   ├── pulsar.py             # Pulsar data model + profile generation
 │   │   └── gravity.py            # Galactic + central-body potential
 │   ├── stages/
 │   │   ├── stage1_dm_localisation.py
@@ -224,12 +240,14 @@ XNAV-Game/
 │   │   └── gravity_panel.py
 │   └── tests/
 │       ├── run_all_tests.py      # Master test runner: python tests/run_all_tests.py
+│       ├── run_convergence_study.py # Batch convergence benchmark (95% target)
 │       ├── test_phase1.py        # Foundation (16 tests)
 │       ├── test_phase2.py        # Physics (34 tests)
 │       ├── test_phase3.py        # Particle filter (12 tests)
 │       ├── test_phase4.py        # Stage logic (13 tests)
 │       ├── test_phase5.py        # Integration (5 tests)
-│       └── test_phase6.py        # UI (10 tests)
+│       ├── test_phase6.py        # UI (10 tests)
+│       └── test_app_smoke.py     # App-level smoke tests via Streamlit AppTest (4 tests)
 ```
 
 ---
@@ -241,7 +259,20 @@ cd xnav_simulator
 python tests/run_all_tests.py
 ```
 
-Expected output: `Total: 90/90 passed · ALL PASS`
+Expected output: `Total: 94/94 passed · ALL PASS`
+
+The suite includes app-level smoke tests (`test_app_smoke.py`) that boot the real
+Streamlit script headlessly and click RUN/RESET, so regressions in `app.py` itself
+are caught — not just in the physics modules.
+
+For a statistical convergence benchmark across all spacecraft presets:
+
+```bash
+python tests/run_convergence_study.py --n 25
+```
+
+Expected: ≥95% of runs converge to < 2 kpc final error (typically 100%, median
+error ~0.6 kpc at Quick Look tier).
 
 Note: tests use a custom `_test("name")` decorator pattern, not pytest.
 
