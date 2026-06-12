@@ -26,12 +26,19 @@ spacecraft's galactic position, converging from ~15 kpc uncertainty to sub-kpc a
 ## Features
 
 - **Interactive galactic map** — top-down Milky Way disk view with a procedurally
-  rendered backdrop (spiral arms, bar, bulge, star field), sprite-style markers,
-  particle cloud overlay, and uncertainty circle; updates live as the filter
-  converges. Pinch/scroll to zoom, drag to pan (the view persists across filter
-  iterations), and tap any body for its data card — pulsars show spin period,
-  characteristic age, surface magnetic field, spin-down luminosity, distance, DM,
-  and flux; the Sun shows its stellar class, age, and effective temperature
+  rendered photographic-style backdrop (patchy spiral arms, bar, bulge, dense star
+  field), point-of-light markers, particle cloud overlay, and uncertainty circle;
+  updates live as the filter converges. Pinch/scroll to zoom, drag to pan (the view
+  persists across filter iterations), and tap any point of light for its data card —
+  pulsars show spin period, characteristic age, surface magnetic field, spin-down
+  luminosity, distance, DM, and flux; the Sun shows its stellar class, age, and
+  effective temperature
+- **3,000 catalogued stars** — every proper-named star plus the brightest of the
+  HYG database (Hipparcos/Yale/Gliese) is on the map as a tappable point of light
+  with spectral type, effective temperature, distance, luminosity, and magnitudes;
+  zoom into the Sun to resolve the solar neighbourhood. Bundled locally
+  (`data/hyg_stars.json`, regenerable via `tools/curate_hyg_stars.py`) — no
+  online lookups needed
 - **Pulsar sky map** — all active pulsars in galactic coordinates (GL/GB), colour-coded by timing
   noise; identified pulsars highlighted
 - **3D particle cloud** — full Liu-West posterior in 3D galactocentric space with playback scrubber

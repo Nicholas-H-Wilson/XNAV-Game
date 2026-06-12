@@ -371,6 +371,24 @@ def _ensure_catalogue_and_ism(settings: dict) -> bool:
 
 # ── Helper: build sim_data dict for UI panels ─────────────────────────────────
 
+@st.cache_data(show_spinner=False)
+def _load_star_catalogue() -> list:
+    """Local HYG star subset for the galaxy map (see tools/curate_hyg_stars.py).
+
+    3000 stars: every proper-named star plus the brightest others, with
+    galactocentric positions, spectral types and derived T_eff. Cached
+    process-wide — the file is static.
+    """
+    import json
+    path = config.DATA_DIR / "hyg_stars.json"
+    try:
+        with open(path) as fh:
+            return json.load(fh)["stars"]
+    except Exception as exc:
+        logger.warning("Star catalogue unavailable (%s); map shows pulsars only.", exc)
+        return []
+
+
 def _build_sim_data(settings: dict) -> dict:
     """Extract all display data from session_state into a plain dict for UI panels.
 
@@ -470,6 +488,7 @@ def _build_sim_data(settings: dict) -> dict:
         "sun_pos_kpc": SUN_POS_KPC,
         "uncertainty_kpc": uncertainty,
         "blind_mode": blind_mode,
+        "stars": _load_star_catalogue(),
         "particle_pos": particles_kpc if pf is not None and pf.initialised else None,
         "particle_weights": weights if pf is not None and pf.initialised else None,
         # Convergence panel

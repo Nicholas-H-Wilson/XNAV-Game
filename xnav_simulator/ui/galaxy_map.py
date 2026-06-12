@@ -80,36 +80,50 @@ def _dark_layout(title: str = "", **kwargs) -> go.Layout:
 
 # ── Procedural galaxy backdrop ────────────────────────────────────────────────
 
+def _smooth_noise(rng: np.random.Generator, n: int, sigma_px: float) -> np.ndarray:
+    """Gaussian-smoothed white noise in [0, 1] via FFT low-pass (numpy only)."""
+    noise = rng.random((n, n))
+    fy = np.fft.fftfreq(n)[:, None]
+    fx = np.fft.rfftfreq(n)[None, :]
+    lowpass = np.exp(-2.0 * (np.pi * sigma_px) ** 2 * (fx ** 2 + fy ** 2))
+    smooth = np.fft.irfft2(np.fft.rfft2(noise) * lowpass, s=(n, n))
+    lo, hi = smooth.min(), smooth.max()
+    return (smooth - lo) / max(hi - lo, 1e-12)
+
+
 @lru_cache(maxsize=1)
 def _galaxy_backdrop():
-    """Render a Milky-Way-like backdrop as a PIL image (cached per process).
+    """Render a photographic-style Milky Way backdrop (cached per process).
 
-    Composited from an exponential disk, a central bar + bulge, four
-    logarithmic spiral arms (12° pitch, matching the navigation geometry's
-    decorative approximation), and a seeded star-speckle field.  The image is
-    anchored to data coordinates so it pans and zooms with the axes.
+    Silvery grey-blue palette: exponential disk, central bar + bulge, four
+    logarithmic spiral arms (12° pitch) broken up by two octaves of smoothed
+    noise so the arms read as patchy star clouds rather than drawn curves,
+    plus a dense magnitude-varying star speckle field and gaussian blooms for
+    the brightest field stars.  Anchored to data coordinates so it pans and
+    zooms with the axes.
 
     DISPLAY-ONLY: purely decorative; does not affect navigation.
     """
     from PIL import Image
 
-    n = 640
+    n = 768
     ext = _MAP_EXTENT_KPC
     ax = np.linspace(-ext, ext, n)
     X, Y = np.meshgrid(ax, ax)
     R = np.sqrt(X ** 2 + Y ** 2)
     TH = np.arctan2(Y, X)
+    rng = np.random.default_rng(20260612)
 
     # Smooth outer edge of the stellar disk
-    edge = 1.0 / (1.0 + np.exp((R - 14.2) / 0.7))
-    disk = np.exp(-R / 5.0) * edge
+    edge = 1.0 / (1.0 + np.exp((R - 14.0) / 0.9))
+    disk = np.exp(-R / 4.6) * edge
 
     # Central bulge + bar (bar angle ~25°)
-    bulge = np.exp(-((R / 1.3) ** 2))
+    bulge = np.exp(-((R / 1.5) ** 2))
     phi = np.radians(25.0)
     Xb = X * np.cos(phi) + Y * np.sin(phi)
     Yb = -X * np.sin(phi) + Y * np.cos(phi)
-    bar = np.exp(-((Xb / 3.2) ** 2 + (Yb / 1.1) ** 2))
+    bar = np.exp(-((Xb / 3.0) ** 2 + (Yb / 1.1) ** 2))
 
     # Four log-spiral arms: gaussian profile in angular distance to each arm
     pitch = np.tan(np.radians(12.0))
@@ -118,31 +132,53 @@ def _galaxy_backdrop():
     arms = np.zeros_like(R)
     for k in range(4):
         d_ang = np.angle(np.exp(1j * (TH - theta_arm - k * np.pi / 2.0)))
-        arms += np.exp(-((d_ang / 0.38) ** 2))
-    arms *= np.exp(-R / 8.0) * edge * (R > 1.8)
+        arms += np.exp(-((d_ang / 0.42) ** 2))
+    arms *= np.exp(-R / 8.5) * edge * (R > 1.6)
 
-    # Compose intensity channels (gamma-lifted so the faint outer disk and
-    # arms survive the dark theme instead of vanishing into the background)
-    glow = np.clip(0.85 * disk + 0.80 * arms * (0.4 + 0.6 * disk), 0.0, 1.0) ** 0.65
-    core = np.clip(bulge + 0.55 * bar * np.exp(-R / 6.0), 0.0, 1.0)
+    # Patchiness: two octaves of smoothed noise turn the clean spiral curves
+    # into clumpy star clouds (the photographic look)
+    clumps = 0.45 + 0.85 * _smooth_noise(rng, n, 7.0)
+    grain = 0.70 + 0.45 * _smooth_noise(rng, n, 2.0)
+    arms_textured = arms * clumps * grain
+    disk_textured = disk * (0.65 + 0.45 * _smooth_noise(rng, n, 11.0))
 
-    # Colour: deep indigo glow, warm white core
-    base = np.array([6, 6, 15], dtype=np.float64)
+    # Compose intensity (gamma-lifted so faint structure survives dark theme)
+    glow = np.clip(0.62 * disk_textured
+                   + 0.85 * arms_textured * (0.35 + 0.65 * disk), 0.0, 1.0) ** 0.62
+    core = np.clip(bulge + 0.50 * bar * np.exp(-R / 6.0), 0.0, 1.0)
+
+    # Silvery grey with a faint blue cast; near-white core
+    base = np.array([5, 5, 10], dtype=np.float64)
     rgb = np.empty((n, n, 3), dtype=np.float64)
-    rgb[..., 0] = base[0] + 80 * glow + 190 * core
-    rgb[..., 1] = base[1] + 95 * glow + 170 * core
-    rgb[..., 2] = base[2] + 175 * glow + 140 * core
+    rgb[..., 0] = base[0] + 132 * glow + 205 * core
+    rgb[..., 1] = base[1] + 138 * glow + 205 * core
+    rgb[..., 2] = base[2] + 158 * glow + 200 * core
 
-    # Star speckle field, denser inside the disk
-    rng = np.random.default_rng(20260612)
+    # Dense star speckle, magnitude-varying, concentrated in disk and arms
     speckle = rng.random((n, n))
-    p_star = 0.0012 + 0.004 * disk + 0.004 * arms
-    stars = speckle < p_star
-    brightness = 90 + 140 * rng.random((n, n))
+    p_star = 0.0025 + 0.010 * disk + 0.012 * arms_textured
+    star_mask = speckle < p_star
+    brightness = (40 + 215 * rng.random((n, n)) ** 2.2)
     for c in range(3):
-        rgb[..., c] = np.where(stars, np.minimum(rgb[..., c] + brightness, 255), rgb[..., c])
+        rgb[..., c] = np.where(star_mask,
+                               np.minimum(rgb[..., c] + brightness, 255),
+                               rgb[..., c])
 
-    img = np.clip(rgb, 0, 255).astype(np.uint8)
+    # Gaussian blooms for ~220 bright field stars (2-3 px halos)
+    weights = (disk + 0.8 * arms).ravel()
+    weights /= weights.sum()
+    idx = rng.choice(n * n, size=220, replace=False, p=weights)
+    iy, ix = np.unravel_index(idx, (n, n))
+    stamp = np.exp(-0.5 * (np.arange(-3, 4)[:, None] ** 2
+                           + np.arange(-3, 4)[None, :] ** 2) / 1.1 ** 2)
+    for y0, x0 in zip(iy, ix):
+        if 3 <= y0 < n - 3 and 3 <= x0 < n - 3:
+            amp = 120 + 135 * rng.random()
+            patch = rgb[y0 - 3:y0 + 4, x0 - 3:x0 + 4, :]
+            patch += (amp * stamp)[..., None]
+    np.clip(rgb, 0, 255, out=rgb)
+
+    img = rgb.astype(np.uint8)
     # PIL row 0 is the TOP of the image (y=+ext); meshgrid row 0 is y=−ext.
     return Image.fromarray(np.flipud(img))
 
@@ -238,6 +274,54 @@ _SUN_HOVER = (
     "<extra></extra>"
 )
 
+_STAR_HOVER = (
+    "<b>%{customdata[0]}</b><br>"
+    "%{customdata[1]}<br>"
+    "─────────────────<br>"
+    "T_eff         %{customdata[2]}<br>"
+    "Distance      %{customdata[3]}<br>"
+    "Luminosity    %{customdata[4]}<br>"
+    "App. mag      %{customdata[5]}<br>"
+    "Abs. mag      %{customdata[6]}<br>"
+    "Age           not catalogued"
+    "<extra></extra>"
+)
+
+_SPECTRAL_DESC = {
+    "O": "O-type — blue, very hot, massive",
+    "B": "B-type — blue-white, hot",
+    "A": "A-type — white",
+    "F": "F-type — yellow-white",
+    "G": "G-type — yellow (Sun-like)",
+    "K": "K-type — orange",
+    "M": "M-type — red, cool",
+    "L": "L-type — brown dwarf",
+    "W": "Wolf-Rayet — evolved, very hot",
+    "C": "Carbon star — cool giant",
+    "S": "S-type — cool giant",
+    "D": "White dwarf — stellar remnant",
+}
+
+
+def _star_customdata(s: dict) -> list:
+    """Columns for the catalogued-star hovertemplate (pre-formatted)."""
+    spect = s.get("spect") or ""
+    desc = _SPECTRAL_DESC.get(spect[:1].upper(), "spectral type unknown")
+    if spect:
+        desc = f"{spect} · {desc.split('—')[-1].strip()}"
+    teff = s.get("teff_k")
+    lum = s.get("lum")
+    d_pc = s.get("d_pc", 0.0)
+    return [
+        s.get("name", "?"),
+        desc,
+        f"{teff:,} K" if teff else "unknown",
+        f"{d_pc:.1f} pc ({d_pc * 3.262:.0f} ly)",
+        f"{lum:,.1f} L☉" if lum else "unknown",
+        f"{s.get('mag', 0.0):+.2f}",
+        f"{s.get('absmag', 0.0):+.2f}",
+    ]
+
 
 # ── Main figure builders ──────────────────────────────────────────────────────
 
@@ -269,7 +353,27 @@ def build_topdown_figure(data: dict) -> go.Figure:
         name="_disk_boundary",
     ))
 
-    # Pulsars — glow halo + DM-coloured star core, rich data-card popup
+    # Catalogued stars — points of light, every one tappable for its data card.
+    # All real stars sit within ~1 kpc of the Sun: a bright clump at full
+    # zoom that resolves into the named solar neighbourhood as you zoom in.
+    stars = data.get("stars", [])
+    if stars:
+        mags = np.array([s.get("mag", 6.0) for s in stars])
+        # Brighter star → larger point of light (apparent mag −1.5 … 6)
+        sizes = np.clip(4.6 - 0.55 * mags, 1.4, 6.5)
+        fig.add_trace(go.Scattergl(
+            x=[s["x_kpc"] for s in stars],
+            y=[s["y_kpc"] for s in stars],
+            mode="markers",
+            marker=dict(size=sizes, color="rgba(235,240,255,0.85)",
+                        line=dict(width=0)),
+            customdata=[_star_customdata(s) for s in stars],
+            hovertemplate=_STAR_HOVER,
+            showlegend=False,
+            name="Catalogued stars",
+        ))
+
+    # Pulsars — points of light: soft halo + bright pinpoint core
     if pulsars:
         px, py, cdata, ident_x, ident_y = [], [], [], [], []
         pdms = []
@@ -290,36 +394,37 @@ def build_topdown_figure(data: dict) -> go.Figure:
         fig.add_trace(go.Scatter(
             x=px, y=py,
             mode="markers",
-            marker=dict(size=13, color="rgba(140,200,255,0.16)", symbol="circle"),
+            marker=dict(size=10, color="rgba(150,205,255,0.22)", symbol="circle",
+                        line=dict(width=0)),
             hoverinfo="skip",
             showlegend=False,
             name="_pulsar_halo",
         ))
-        # Core sprite — 4-point star, tinted by DM
+        # Pinpoint core — DM-tinted point of light (no symbol shapes)
         fig.add_trace(go.Scatter(
             x=px, y=py,
             mode="markers",
             marker=dict(
-                size=7,
+                size=3.6,
                 color=pdms,
-                colorscale=[[0.0, "#9fc8ff"], [0.5, "#e8f4ff"], [1.0, "#fff7d6"]],
+                colorscale=[[0.0, "#cfe4ff"], [0.5, "#ffffff"], [1.0, "#fff3cf"]],
                 showscale=False,
-                symbol="star-diamond",
-                line=dict(width=0.6, color="rgba(200,230,255,0.85)"),
-                opacity=0.95,
+                symbol="circle",
+                line=dict(width=0),
+                opacity=1.0,
             ),
             customdata=cdata,
             hovertemplate=_PULSAR_HOVER,
             showlegend=False,
             name="Pulsars",
         ))
-        # Identification rings
+        # Identification rings — thin and faint, just enough to read
         if ident_x:
             fig.add_trace(go.Scatter(
                 x=ident_x, y=ident_y,
                 mode="markers",
-                marker=dict(size=15, color="rgba(0,0,0,0)", symbol="circle-open",
-                            line=dict(width=1.4, color=_ACCENT)),
+                marker=dict(size=12, color="rgba(0,0,0,0)", symbol="circle-open",
+                            line=dict(width=1, color="rgba(0,212,255,0.75)")),
                 hoverinfo="skip",
                 showlegend=True,
                 name="Identified pulsar",
@@ -365,17 +470,17 @@ def build_topdown_figure(data: dict) -> go.Figure:
         fig.add_trace(go.Scatter(
             x=[tp[0]], y=[tp[1]],
             mode="markers",
-            marker=dict(size=17, color="rgba(0,0,0,0)", symbol="circle-open",
-                        line=dict(width=1.5, color="#FF5555")),
+            marker=dict(size=14, color="rgba(255,90,90,0.18)", symbol="circle",
+                        line=dict(width=0)),
             hoverinfo="skip",
             showlegend=False,
-            name="_true_ring",
+            name="_true_glow",
         ))
         fig.add_trace(go.Scatter(
             x=[tp[0]], y=[tp[1]],
             mode="markers",
-            marker=dict(size=11, color="#FF5555", symbol="cross-thin",
-                        line=dict(width=1.6, color="#FF5555")),
+            marker=dict(size=4.5, color="#FF6666", symbol="circle",
+                        line=dict(width=0)),
             name="True position",
             showlegend=True,
             hovertemplate=("<b>True position</b><br>"
@@ -393,40 +498,44 @@ def build_topdown_figure(data: dict) -> go.Figure:
         name=f"Uncertainty (1σ = {_fmt_kpc(uncertainty_kpc)})",
     ))
 
-    # Spacecraft estimated position — glow + star, added last so it renders on top
+    # Spacecraft estimated position — layered point of light, on top
+    for size, alpha in ((22, 0.10), (12, 0.25)):
+        fig.add_trace(go.Scatter(
+            x=[sc_pos[0]], y=[sc_pos[1]],
+            mode="markers",
+            marker=dict(size=size, color=f"rgba(0,212,255,{alpha})",
+                        symbol="circle", line=dict(width=0)),
+            hoverinfo="skip",
+            showlegend=False,
+            name="_estimate_glow",
+        ))
     fig.add_trace(go.Scatter(
         x=[sc_pos[0]], y=[sc_pos[1]],
         mode="markers",
-        marker=dict(size=26, color="rgba(0,212,255,0.20)", symbol="circle"),
-        hoverinfo="skip",
-        showlegend=False,
-        name="_estimate_glow",
-    ))
-    fig.add_trace(go.Scatter(
-        x=[sc_pos[0]], y=[sc_pos[1]],
-        mode="markers",
-        marker=dict(size=15, color=_ACCENT, symbol="star",
-                    line=dict(width=1, color="white")),
+        marker=dict(size=5.5, color="#9FEFFF", symbol="circle",
+                    line=dict(width=0)),
         name="Estimate",
         hovertemplate=("<b>Spacecraft estimate</b><br>"
                        f"({sc_pos[0]:.2f}, {sc_pos[1]:.2f}) kpc<br>"
                        f"1σ uncertainty {_fmt_kpc(uncertainty_kpc)}<extra></extra>"),
     ))
 
-    # Sun reference — warm glow + core with stellar data card
+    # Sun reference — warm layered point of light with stellar data card
+    for size, alpha in ((16, 0.12), (9, 0.30)):
+        fig.add_trace(go.Scatter(
+            x=[sun_pos[0]], y=[sun_pos[1]],
+            mode="markers",
+            marker=dict(size=size, color=f"rgba(255,215,120,{alpha})",
+                        symbol="circle", line=dict(width=0)),
+            hoverinfo="skip",
+            showlegend=False,
+            name="_sun_glow",
+        ))
     fig.add_trace(go.Scatter(
         x=[sun_pos[0]], y=[sun_pos[1]],
         mode="markers",
-        marker=dict(size=20, color="rgba(255,215,0,0.22)", symbol="circle"),
-        hoverinfo="skip",
-        showlegend=False,
-        name="_sun_glow",
-    ))
-    fig.add_trace(go.Scatter(
-        x=[sun_pos[0]], y=[sun_pos[1]],
-        mode="markers",
-        marker=dict(size=9, color="#FFD700", symbol="circle",
-                    line=dict(width=1, color="#FFF2B0")),
+        marker=dict(size=4.5, color="#FFE9A0", symbol="circle",
+                    line=dict(width=0)),
         name="Sun",
         hovertemplate=_SUN_HOVER,
     ))
@@ -492,13 +601,13 @@ def build_skymap_figure(data: dict) -> go.Figure:
             x=gls[mask_un], y=gbs[mask_un],
             mode="markers",
             marker=dict(
-                size=7,
+                size=5,
                 color=scores[mask_un],
                 colorscale="RdYlGn_r",
                 cmin=1, cmax=500,
-                symbol="star-diamond",
-                opacity=0.85,
-                line=dict(width=0.5, color="rgba(255,255,255,0.4)"),
+                symbol="circle",
+                opacity=0.9,
+                line=dict(width=0),
             ),
             customdata=[c for c, m in zip(cdata, mask_un) if m],
             hovertemplate=_PULSAR_HOVER,
@@ -543,7 +652,11 @@ def render(data: dict) -> None:
         fig = build_topdown_figure(data)
         st.plotly_chart(fig, width="stretch",
                         config={"displayModeBar": False, "scrollZoom": True})
-        st.caption("Pinch or scroll to zoom · drag to pan · tap any body for its data card · double-tap to reset")
+        st.caption(
+            "Pinch or scroll to zoom · drag to pan · tap any point of light "
+            "for its data card · double-tap to reset. Zoom into the Sun to "
+            "resolve 3,000 catalogued stars of the solar neighbourhood."
+        )
     with col2:
         fig = build_skymap_figure(data)
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
