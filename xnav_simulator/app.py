@@ -427,11 +427,26 @@ def _build_sim_data(settings: dict) -> dict:
         conf = next((r.get("confidence", 0.0) for r in identifications
                      if r.get("best_match") is not None
                      and r["best_match"].name == p.name), 0.0)
+        # Derived astrophysics for the map popups (standard dipole formulas):
+        # surface field B ≈ 3.2×10¹⁹ √(P·Ṗ) G; spin-down Ė = 4π²I·Ṗ/P³ (I=10⁴⁵ g cm²)
+        pdot = max(p.period_dot, 0.0)
+        b_surf_g = 3.2e19 * float(np.sqrt(p.period * pdot)) if pdot > 0 else 0.0
+        edot_erg_s = 3.95e46 * pdot / (p.period ** 3) if pdot > 0 else 0.0
+        ppos = p.position_kpc
         pulsar_dicts.append({
             "name": p.name, "dm": p.dm, "period": p.period,
             "distance_kpc": p.distance_kpc, "gl": p.gl, "gb": p.gb,
             "timing_noise_ns": p.timing_noise_ns, "w50": p.w50,
             "identified": ident, "confidence": conf,
+            # Map sprite data
+            "x_kpc": float(ppos[0]), "y_kpc": float(ppos[1]), "z_kpc": float(ppos[2]),
+            "period_dot": p.period_dot,
+            "age_yr": float(p.characteristic_age_yr),
+            "b_surf_g": b_surf_g,
+            "edot_erg_s": edot_erg_s,
+            "type": ("Millisecond pulsar — recycled neutron star"
+                     if p.period < 0.03 else "Rotation-powered pulsar (neutron star)"),
+            "s1400_mjy": p.s1400,
             # Timing contributions (populated from observed_timings if available)
             **_pulsar_timing_contributions(p, st.session_state.observed_timings,
                                            settings),
