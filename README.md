@@ -25,8 +25,13 @@ spacecraft's galactic position, converging from ~15 kpc uncertainty to sub-kpc a
 
 ## Features
 
-- **Interactive galactic map** — top-down Milky Way disk view with spiral arms, pulsar catalogue,
-  particle cloud overlay, and uncertainty circle; updates live as the filter converges
+- **Interactive galactic map** — top-down Milky Way disk view with a procedurally
+  rendered backdrop (spiral arms, bar, bulge, star field), sprite-style markers,
+  particle cloud overlay, and uncertainty circle; updates live as the filter
+  converges. Pinch/scroll to zoom, drag to pan (the view persists across filter
+  iterations), and tap any body for its data card — pulsars show spin period,
+  characteristic age, surface magnetic field, spin-down luminosity, distance, DM,
+  and flux; the Sun shows its stellar class, age, and effective temperature
 - **Pulsar sky map** — all active pulsars in galactic coordinates (GL/GB), colour-coded by timing
   noise; identified pulsars highlighted
 - **3D particle cloud** — full Liu-West posterior in 3D galactocentric space with playback scrubber
