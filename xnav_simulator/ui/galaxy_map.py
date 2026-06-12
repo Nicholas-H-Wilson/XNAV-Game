@@ -186,7 +186,10 @@ def build_topdown_figure(data: dict) -> go.Figure:
             xaxis=dict(**_AXIS_STYLE, title="X (kpc)", range=[-16, 16]),
             yaxis=dict(**_AXIS_STYLE, title="Y (kpc)", range=[-16, 16],
                        scaleanchor="x", scaleratio=1),
-            legend=dict(bgcolor="rgba(0,0,0,0.5)", x=0.01, y=0.99, font=dict(size=10)),
+            # Horizontal legend below the plot — anchored top-left it overlaps
+            # the title on phone-width viewports.
+            legend=dict(bgcolor="rgba(0,0,0,0.5)", orientation="h",
+                        x=0.5, xanchor="center", y=-0.18, font=dict(size=10)),
             height=420,
         )
         return fig
@@ -240,7 +243,10 @@ def build_topdown_figure(data: dict) -> go.Figure:
         xaxis=dict(**_AXIS_STYLE, title="X (kpc)", range=[-16, 16]),
         yaxis=dict(**_AXIS_STYLE, title="Y (kpc)", range=[-16, 16],
                    scaleanchor="x", scaleratio=1),
-        legend=dict(bgcolor="rgba(0,0,0,0.5)", x=0.01, y=0.99, font=dict(size=10)),
+        # Horizontal legend below the plot — inside the axes it covers the
+        # galaxy on phone-width viewports.
+        legend=dict(bgcolor="rgba(0,0,0,0.5)", orientation="h",
+                    x=0.5, xanchor="center", y=-0.18, font=dict(size=10)),
         height=420,
     )
     return fig
@@ -331,7 +337,7 @@ def render(data: dict) -> None:
     col1, col2 = st.columns(2)
     with col1:
         fig = build_topdown_figure(data)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     with col2:
         fig = build_skymap_figure(data)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})

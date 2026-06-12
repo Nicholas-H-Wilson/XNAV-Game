@@ -167,12 +167,12 @@ def render() -> dict:
         run_clicked = st.button(
             "▶  RUN SIMULATION",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
         st.markdown('<div style="margin-top:4px;"></div>', unsafe_allow_html=True)
         reset_clicked = st.button(
             "↺  Reset",
-            use_container_width=True,
+            width="stretch",
             help="Clear all simulation state and start over",
         )
 

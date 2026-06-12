@@ -1,0 +1,3 @@
+# Streamlit Community Cloud (and other deploy targets) read requirements.txt
+# from the repo root.  The canonical dependency list lives with the app.
+-r xnav_simulator/requirements.txt

@@ -293,10 +293,10 @@ def render(data: dict) -> None:
     data = dict(data, selected_pulsar=selected)
 
     fig_sweep = build_dispersive_sweep_figure(data)
-    st.plotly_chart(fig_sweep, use_container_width=True)
+    st.plotly_chart(fig_sweep, width="stretch", config={"displayModeBar": False})
 
     fig_breakdown = build_residual_breakdown_figure(data)
-    st.plotly_chart(fig_breakdown, use_container_width=True)
+    st.plotly_chart(fig_breakdown, width="stretch", config={"displayModeBar": False})
 
     fig_dm = build_dm_residual_figure(data)
-    st.plotly_chart(fig_dm, use_container_width=True)
+    st.plotly_chart(fig_dm, width="stretch", config={"displayModeBar": False})

@@ -317,11 +317,11 @@ def render(data: dict) -> None:
 
     with col2:
         fig_phi = build_potential_figure(data)
-        st.plotly_chart(fig_phi, use_container_width=True)
+        st.plotly_chart(fig_phi, width="stretch", config={"displayModeBar": False})
 
     # Middle: reality check bar chart
     fig_bar = build_reality_check_figure(data)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch", config={"displayModeBar": False})
 
     # Gravity vs DM ratio callout
     ratio = budget["dm_turb_ns"] / max(budget["gravity_ns"], 1e-12)

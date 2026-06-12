@@ -47,6 +47,35 @@ spacecraft's galactic position, converging from ~15 kpc uncertainty to sub-kpc a
 
 ---
 
+## Run it on your phone (Streamlit Community Cloud)
+
+The app is mobile-optimised (tested at Pixel-class viewports) and deploys to
+Streamlit Community Cloud for free, straight from this GitHub repo. The whole
+flow works from an Android browser:
+
+1. Open [share.streamlit.io](https://share.streamlit.io) and sign in with the
+   GitHub account that owns this repository.
+2. Tap **Create app** → **Deploy a public app from GitHub**.
+3. Fill in:
+   - **Repository:** `Nicholas-H-Wilson/XNAV-Game`
+   - **Branch:** `main` (or the branch you want to serve)
+   - **Main file path:** `xnav_simulator/app.py`
+4. (Optional) Under **Advanced settings**, select **Python 3.12**.
+5. Tap **Deploy**. First build takes a few minutes; after that the app lives at
+   a permanent `https://<your-app-name>.streamlit.app` URL.
+
+On the phone: the big **▶ RUN SIMULATION** button is in the main view (the
+sidebar with tier/preset/noise settings opens via the **»** chevron, top-left).
+A Quick Look run completes in seconds. Add the URL to your home screen
+(browser menu → *Add to Home screen*) for an app-like experience.
+
+The repo is pre-configured for this: root `requirements.txt`,
+`.streamlit/config.toml` (dark theme), and `.python-version` are all in place,
+and all data (pulsar catalogue + DM grid) is bundled — no network access or
+compiled dependencies needed at runtime.
+
+---
+
 ## Quick Start (existing Python environment)
 
 ```bash

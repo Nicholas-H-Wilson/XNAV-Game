@@ -312,8 +312,8 @@ def render(data: dict) -> None:
 
     # 3D particle cloud (single chart — uses scrubbed history frame if selected)
     fig3d = build_particle_figure(data)
-    st.plotly_chart(fig3d, use_container_width=True)
+    st.plotly_chart(fig3d, width="stretch", config={"displayModeBar": False})
 
     # Uncertainty / ESS timeline
     fig_timeline = build_uncertainty_timeline_figure(data)
-    st.plotly_chart(fig_timeline, use_container_width=True)
+    st.plotly_chart(fig_timeline, width="stretch", config={"displayModeBar": False})

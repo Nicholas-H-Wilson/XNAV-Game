@@ -32,7 +32,9 @@ SOLAR_GALACTOCENTRIC_KPC = 8.178  # kpc — GRAVITY Collaboration 2019 (A&A 625 
 SUN_POS_KPC: np.ndarray = np.array([-8.178, 0.0, 0.0], dtype=np.float64)
 
 # ── Particle filter defaults ──────────────────────────────────────────────────
-DEFAULT_TIER = "Balanced (40 pulsars)"
+# Quick Look default: first run completes in seconds — important on phones and
+# resource-limited cloud hosts; users can step up tiers from the sidebar.
+DEFAULT_TIER = "Quick Look (20 pulsars)"
 LIU_WEST_H = 0.1            # Liu-West kernel bandwidth (standard value)
 ESS_RESAMPLE_THRESHOLD = 0.5   # fraction of n_particles → trigger resampling
 ESS_REINJECT_THRESHOLD = 0.1   # fraction of n_particles → trigger reinjection

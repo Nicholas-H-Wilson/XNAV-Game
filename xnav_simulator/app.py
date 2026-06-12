@@ -797,12 +797,37 @@ def _handle_run(settings: dict) -> None:
                 tier_name, len(pulsars), tier_cfg["n_particles"])
 
 
+# ── Main-area run controls ────────────────────────────────────────────────────
+# On phones the sidebar starts collapsed, so the primary action must live in
+# the main column — first-time mobile users would otherwise never find RUN.
+
+main_run_clicked = False
+main_reset_clicked = False
+if not st.session_state.running:
+    if st.session_state.filter is None:
+        main_run_clicked = st.button(
+            "▶  RUN SIMULATION", type="primary", width="stretch",
+            key="run_main",
+        )
+        st.caption(
+            f"Tier: **{settings['tier']}** · Scenario: **{settings['preset']}** — "
+            "change these in the sidebar (» top-left)."
+        )
+    else:
+        col_again, col_reset_main = st.columns(2)
+        main_run_clicked = col_again.button(
+            "▶  RUN AGAIN", type="primary", width="stretch", key="run_main",
+        )
+        main_reset_clicked = col_reset_main.button(
+            "↺  RESET", width="stretch", key="reset_main",
+        )
+
 # ── Process button clicks ─────────────────────────────────────────────────────
 
-if settings.get("run_clicked"):
+if settings.get("run_clicked") or main_run_clicked:
     _handle_run(settings)
 
-if settings.get("reset_clicked"):
+if settings.get("reset_clicked") or main_reset_clicked:
     _do_reset()
     st.rerun()
 
@@ -812,14 +837,18 @@ if settings.get("reset_clicked"):
 if st.session_state.running and st.session_state.filter is not None:
     _MAX_ITER = 20
     progress_frac = min(st.session_state.iteration / _MAX_ITER, 1.0)
+    shown_iter = min(st.session_state.iteration + 1, _MAX_ITER)
     st.progress(
         progress_frac,
-        text=f"Iteration {st.session_state.iteration + 1} of ~{_MAX_ITER} — particle filter updating…",
+        text=f"Iteration {shown_iter} of ~{_MAX_ITER} — particle filter updating…",
     )
     with st.spinner(""):
         _run_one_phase5_pipeline(settings)
-    if st.session_state.running:
-        st.rerun()   # trigger next iteration
+    # Rerun unconditionally: while running it advances the loop; when the
+    # pipeline just finished it redraws the page fresh — without this the
+    # browser is left on a stale frame (RUNNING badge + progress bar) until
+    # the next user interaction.
+    st.rerun()
 
 
 # ── Build simulation data dict for UI panels ──────────────────────────────────
@@ -909,7 +938,7 @@ if pf is not None and pf.initialised:
                 data=csv_bytes,
                 file_name="xnav_results.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
 else:
     st.markdown(

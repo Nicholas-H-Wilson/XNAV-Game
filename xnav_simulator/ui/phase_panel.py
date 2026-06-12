@@ -246,10 +246,10 @@ def render(data: dict) -> None:
     col1, col2 = st.columns([1, 1])
     with col1:
         fig_dials = build_phase_dials_figure(data)
-        st.plotly_chart(fig_dials, use_container_width=True)
+        st.plotly_chart(fig_dials, width="stretch", config={"displayModeBar": False})
     with col2:
         fig_timeline = build_ambiguity_timeline_figure(data)
-        st.plotly_chart(fig_timeline, use_container_width=True)
+        st.plotly_chart(fig_timeline, width="stretch", config={"displayModeBar": False})
 
     # Clock estimate summary
     if data.get("stage4_complete"):
