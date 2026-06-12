@@ -39,3 +39,6 @@ Thumbs.db
 # Large data files generated at runtime (ne2001_grid.npz is committed as a seed;
 # higher-resolution grids generated locally should not be committed)
 xnav_simulator/data/ne2001_grid_*.npz
+
+# Simulation run logs (generated at runtime)
+xnav_simulator/logs/
