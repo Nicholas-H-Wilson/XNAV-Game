@@ -264,8 +264,21 @@ class ParticleFilter:
             center, radius_kpc,
         )
 
-    def initialise_from_stage1(self, coarse_likelihood_map: dict) -> None:
+    def initialise_from_stage1(
+        self,
+        coarse_likelihood_map: dict,
+        uniform_fraction: float = 0.25,
+    ) -> None:
         """Sample particle positions from the Stage 1 coarse likelihood map.
+
+        A fraction of particles (uniform_fraction) is sampled uniformly over
+        the whole galactic disk instead of from the map.  The DM-only Stage 1
+        likelihood is multi-modal and can be confidently wrong — placing every
+        particle in a single wrong basin leaves the filter nothing to recover
+        with.  A thin uniform floor guarantees a few particles near the truth;
+        the timing likelihood then amplifies them (a lone good particle takes
+        a few percent of the tempered posterior mass on the first update and
+        compounds geometrically after resampling).
 
         Parameters
         ----------
@@ -273,6 +286,7 @@ class ParticleFilter:
             probability_map: 3D float64 array (non-negative, need not be normalised)
             x_arr, y_arr, z_arr: coordinate axes (kpc, galactocentric)
             velocity_scale_kms: optional float (default 200.0)
+        uniform_fraction: fraction of particles seeded uniformly over the disk
         """
         prob = np.asarray(coarse_likelihood_map["probability_map"], dtype=np.float64)
         x_arr = np.asarray(coarse_likelihood_map["x_arr"])
@@ -288,9 +302,14 @@ class ParticleFilter:
             raise ValueError("Stage 1 probability map sums to zero — cannot initialise.")
         flat_prob /= total
 
+        # Split: map-sampled particles vs uniform disk floor
+        n_uniform = int(round(np.clip(uniform_fraction, 0.0, 1.0)
+                              * self.n_particles))
+        n_map = self.n_particles - n_uniform
+
         # Sample voxel indices proportional to probability
         n_voxels = flat_prob.size
-        indices = self._rng.choice(n_voxels, size=self.n_particles, p=flat_prob)
+        indices = self._rng.choice(n_voxels, size=n_map, p=flat_prob)
 
         nx, ny, nz = prob.shape
         ix = indices // (ny * nz)
@@ -302,13 +321,13 @@ class ParticleFilter:
         dy = (y_arr[1] - y_arr[0]) if len(y_arr) > 1 else 0.1
         dz = (z_arr[1] - z_arr[0]) if len(z_arr) > 1 else 0.1
 
-        jitter_x = self._rng.uniform(-0.5 * dx, 0.5 * dx, self.n_particles)
-        jitter_y = self._rng.uniform(-0.5 * dy, 0.5 * dy, self.n_particles)
-        jitter_z = self._rng.uniform(-0.5 * dz, 0.5 * dz, self.n_particles)
+        self.particles[:n_map, 0] = x_arr[ix] + self._rng.uniform(-0.5 * dx, 0.5 * dx, n_map)
+        self.particles[:n_map, 1] = y_arr[iy] + self._rng.uniform(-0.5 * dy, 0.5 * dy, n_map)
+        self.particles[:n_map, 2] = z_arr[iz] + self._rng.uniform(-0.5 * dz, 0.5 * dz, n_map)
 
-        self.particles[:, 0] = x_arr[ix] + jitter_x
-        self.particles[:, 1] = y_arr[iy] + jitter_y
-        self.particles[:, 2] = z_arr[iz] + jitter_z
+        if n_uniform > 0:
+            self.particles[n_map:, :3] = Galaxy.sample_uniform(n_uniform, self._rng)
+
         self.particles[:, 3:] = self._rng.normal(0.0, v_scale, (self.n_particles, 3))
         self.weights[:] = 1.0 / self.n_particles
 

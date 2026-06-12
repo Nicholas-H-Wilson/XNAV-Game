@@ -148,17 +148,23 @@ class Dispersion:
         cos_elng = np.clip(np.dot(sc_dir, pulsar_dir), -1.0, 1.0)
         sin_elng = np.sqrt(max(1.0 - cos_elng ** 2, 1e-12))
 
-        # Analytical integral of n_e(r) = n_e0 × (r0/r)² along the LOS
-        # For a sightline at impact parameter b = r_sc × sin(ε):
-        # DM ≈ n_e0 × r0² × π / (2 × b)  (in cm⁻³ × AU)
-        # Convert: 1 AU = 3.086e18 cm / (3.086e16 cm/pc) = 100 pc... wait, units:
-        # 1 pc = 3.086e18 cm, 1 AU = 1.496e13 cm = 1.496e13 / 3.086e18 pc = 4.848e-6 pc
+        # Analytical integral of n_e(r) = n_e0 × (r0/r)² along the LOS from
+        # the spacecraft to infinity.  For an observer at heliocentric
+        # distance r_sc and solar elongation ε, the closest LOS approach is
+        # b = r_sc × sin(ε) and the integral evaluates to
+        #   DM = n_e0 × r0² × (π − ε) / b      (in cm⁻³ × AU)
+        # The (π − ε) factor matters: a previous version used π/2, which
+        # underestimates sunward sightlines (ε→0) by 2× and overestimates
+        # anti-sunward ones (ε→π) without bound.
+        # 1 pc = 3.086e18 cm, 1 AU = 1.496e13 cm → 1 AU = 4.848e-6 pc
         AU_TO_PC = 4.848e-6   # 1 AU in parsecs
 
+        elongation = np.arccos(cos_elng)
         impact_param_au = r_sc * sin_elng
         if impact_param_au < 0.1:
             impact_param_au = 0.1   # avoid divergence very close to Sun
 
-        dm_ipm = (n_e0_per_cm3 * r0_au ** 2 * np.pi / 2.0 / impact_param_au) * AU_TO_PC
+        dm_ipm = (n_e0_per_cm3 * r0_au ** 2 * (np.pi - elongation)
+                  / impact_param_au) * AU_TO_PC
 
         return float(max(dm_ipm, 0.0))

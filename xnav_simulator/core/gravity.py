@@ -127,11 +127,14 @@ class Gravity:
         r_m = np.linalg.norm(position_kpc) * KPC_TO_M
         # Logarithmic halo: Φ = (v_c² / 2) × ln(r² + r_c²) + constant
         # We subtract the value at the solar radius to give Φ=0 at r=8.178 kpc
-        # (SOLAR_GALACTOCENTRIC_KPC, GRAVITY Collaboration 2019)
+        # (SOLAR_GALACTOCENTRIC_KPC, GRAVITY Collaboration 2019).
+        # Single log of the ratio — the difference-of-logs form cancels
+        # catastrophically when r ≈ r_sun (both logs ≈ 95, difference ≈ 1e-2).
         from config import SOLAR_GALACTOCENTRIC_KPC
         r_sun_m = SOLAR_GALACTOCENTRIC_KPC * KPC_TO_M
-        phi = 0.5 * v_c**2 * (np.log(r_m**2 + r_c_m**2)
-                               - np.log(r_sun_m**2 + r_c_m**2))
+        phi = 0.5 * v_c**2 * np.log(
+            (r_m**2 + r_c_m**2) / (r_sun_m**2 + r_c_m**2)
+        )
         return float(phi)
 
     # ── Clock slowing ─────────────────────────────────────────────────────────

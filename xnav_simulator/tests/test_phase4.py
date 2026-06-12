@@ -169,6 +169,7 @@ def test_stage1_return_keys():
     result = run(
         pulsars=pulsars,
         observed_dm_values=obs_dms,
+        ism_model=_MockISM(),   # stage 1 now raises without a loaded grid
         grid_resolution_pc=2000.0,
     )
 

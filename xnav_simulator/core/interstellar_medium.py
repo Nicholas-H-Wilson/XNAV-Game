@@ -65,8 +65,11 @@ class InterstellarMedium:
         """
         try:
             import pygedm
-            dm, _ = pygedm.dist_to_dm(gl, gb, distance_kpc, method="ymw16")
-            dm_val = float(dm)
+            # pygedm expects distance in PARSECS (passing kpc silently
+            # shortens every sightline 1000× and zeroes the DM signal).
+            dm, _ = pygedm.dist_to_dm(gl, gb, distance_kpc * 1000.0,
+                                      method="ymw16")
+            dm_val = float(getattr(dm, "value", dm))   # astropy Quantity → float
         except Exception as exc:
             logger.warning("pygedm.dist_to_dm failed for (gl=%.1f, gb=%.1f, d=%.2f): %s",
                            gl, gb, distance_kpc, exc)
@@ -93,6 +96,7 @@ class InterstellarMedium:
         resolution_pc: float,
         output_path: Optional[Path] = None,
         progress_callback=None,
+        z_half_extent_kpc: float = 2.0,
     ) -> None:
         """Build a 3D DM grid over the galactic volume and save to .npz.
 
@@ -112,14 +116,28 @@ class InterstellarMedium:
 
         step_kpc = resolution_pc / 1000.0   # pc → kpc
 
-        # Grid axes in galactocentric kpc
-        x_arr = np.arange(-GALAXY_RADIUS_KPC, GALAXY_RADIUS_KPC + step_kpc, step_kpc)
-        y_arr = np.arange(-GALAXY_RADIUS_KPC, GALAXY_RADIUS_KPC + step_kpc, step_kpc)
-        z_arr = np.arange(
-            -GALAXY_THICKNESS_KPC / 2.0,
-            GALAXY_THICKNESS_KPC / 2.0 + step_kpc,
-            step_kpc,
-        )
+        # Grid axes in galactocentric kpc.  linspace with an odd-symmetric
+        # count keeps the axes exactly symmetric about zero — np.arange with
+        # a step larger than the half-extent previously produced an
+        # asymmetric z axis ([-0.5, +1.5] at 2000 pc resolution).
+        #
+        # Z extends beyond the stellar disk (default ±2 kpc): the filter
+        # samples the grid at spacecraft–pulsar LOS *midpoints*, and pulsars
+        # at high galactic latitude put midpoints well above the thin disk.
+        def _axis(half_extent: float) -> np.ndarray:
+            n_half = max(int(np.ceil(half_extent / step_kpc)), 1)
+            return np.linspace(-n_half * step_kpc, n_half * step_kpc,
+                               2 * n_half + 1)
+
+        x_arr = _axis(GALAXY_RADIUS_KPC)
+        y_arr = _axis(GALAXY_RADIUS_KPC)
+        # Z resolution is relaxed (no finer than 250 pc) — vertical DM
+        # gradients are gentle compared to in-plane structure, and fine z
+        # steps would multiply the pygedm call count for little signal.
+        z_step_kpc = max(step_kpc, 0.25)
+        n_z_half = max(int(np.ceil(z_half_extent_kpc / z_step_kpc)), 1)
+        z_arr = np.linspace(-n_z_half * z_step_kpc, n_z_half * z_step_kpc,
+                            2 * n_z_half + 1)
 
         nx, ny, nz = len(x_arr), len(y_arr), len(z_arr)
         dm_grid = np.zeros((nx, ny, nz), dtype=np.float32)
@@ -136,13 +154,6 @@ class InterstellarMedium:
 
         # Fix log-normal turbulence field for reproducibility
         rng = np.random.default_rng(self._turbulence_seed)
-
-        # APPROXIMATION: Z cells outside ±GALAXY_THICKNESS_KPC/2 are set to
-        # a floor DM of 1.0 pc cm⁻³ rather than querying pygedm (they are
-        # far from the galactic plane and have negligible electron density).
-        # Real ISM extends above the midplane with an exponential scale height
-        # of ~1 kpc for the warm ionised medium. Floor error < 5 pc cm⁻³ for
-        # sources at |z| > 0.5 kpc.
 
         try:
             import pygedm
@@ -161,8 +172,10 @@ class InterstellarMedium:
                         dm_val = 1.0
                     elif pygedm is not None:
                         try:
-                            dm_val, _ = pygedm.dist_to_dm(gl, gb, d_kpc, method="ymw16")
-                            dm_val = float(max(dm_val, 0.0))
+                            # pygedm expects distance in PARSECS
+                            dm_val, _ = pygedm.dist_to_dm(gl, gb, d_kpc * 1000.0,
+                                                          method="ymw16")
+                            dm_val = float(max(getattr(dm_val, "value", dm_val), 0.0))
                         except Exception:
                             dm_val = self._fallback_dm(gb, d_kpc)
                     else:
@@ -212,11 +225,16 @@ class InterstellarMedium:
             bounds_error=False,
             fill_value=1.0,   # outside grid → minimal DM (far from plane)
         )
+        self._resolution_pc = float(data.get("resolution_pc", [float("nan")])[0])
         logger.info(
             "DM grid loaded: %dx%dx%d, resolution %.0f pc",
-            len(x_arr), len(y_arr), len(z_arr),
-            float(data.get("resolution_pc", [np.nan])[0]),
+            len(x_arr), len(y_arr), len(z_arr), self._resolution_pc,
         )
+
+    @property
+    def resolution_pc(self) -> float:
+        """In-plane resolution (pc) of the loaded grid, or NaN if none."""
+        return getattr(self, "_resolution_pc", float("nan"))
 
     def lookup_dm_grid(
         self,
@@ -297,6 +315,27 @@ class InterstellarMedium:
         pts = np.asarray(points_kpc, dtype=np.float64)
         if pts.ndim == 1:
             pts = pts.reshape(1, 3)
+
+        # Out-of-grid points silently receive the fill value (DM = 1.0) and
+        # carry no navigation signal — warn once per session if that happens
+        # for a meaningful fraction of lookups (issue: silent fill values).
+        if self._grid_coords is not None and not getattr(self, "_warned_oob", False):
+            x_arr, y_arr, z_arr = self._grid_coords
+            oob = (
+                (pts[:, 0] < x_arr[0]) | (pts[:, 0] > x_arr[-1])
+                | (pts[:, 1] < y_arr[0]) | (pts[:, 1] > y_arr[-1])
+                | (pts[:, 2] < z_arr[0]) | (pts[:, 2] > z_arr[-1])
+            )
+            frac_oob = float(np.mean(oob))
+            if frac_oob > 0.01:
+                self._warned_oob = True
+                logger.warning(
+                    "%.0f%% of DM lookups fall outside the precomputed grid "
+                    "(x∈[%.1f, %.1f], z∈[%.1f, %.1f] kpc) and receive the "
+                    "fill value — navigation signal is degraded there.",
+                    100 * frac_oob, x_arr[0], x_arr[-1], z_arr[0], z_arr[-1],
+                )
+
         return self._interpolator(pts)
 
     def grid_loaded(self) -> bool:

@@ -142,6 +142,10 @@ def _zncc(a: np.ndarray, b: np.ndarray) -> tuple[float, int]:
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
     if norm_a < 1e-12 or norm_b < 1e-12:
+        logger.warning(
+            "ZNCC received a zero-norm (flat) profile — returning zero "
+            "correlation; the pulsar cannot be identified from this profile."
+        )
         return 0.0, 0
 
     # Circular correlation via FFT — O(n log n)

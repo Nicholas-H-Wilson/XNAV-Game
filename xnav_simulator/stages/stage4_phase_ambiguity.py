@@ -99,6 +99,9 @@ def run(
     # Determine grid parameters
     min_period = sorted_pulsars[0].period
     grid_step = max(min_period * _GRID_RESOLUTION_FRACTION, 1e-9)  # ≥ 1 ns
+    # Guard: the step must subdivide the search window, or np.arange below
+    # degenerates to a single candidate (possible for very slow pulsars).
+    grid_step = min(grid_step, _MAX_CLOCK_OFFSET_S / 10.0)
 
     # Initial candidate window: ±MAX_CLOCK_OFFSET_S
     t_candidates = np.arange(-_MAX_CLOCK_OFFSET_S, _MAX_CLOCK_OFFSET_S, grid_step)
@@ -135,18 +138,21 @@ def run(
         new_candidates = t_candidates[consistent]
 
         if len(new_candidates) == 0:
-            # No candidates survived — timing data inconsistent with prior window.
-            # APPROXIMATION: Fall back to narrowing around the best-score candidate
-            # rather than completely collapsing.  In practice this means ISM noise
-            # pushed the arrival time out of the tolerance band.  Widen tolerance
-            # to 3% of period and retry.
-            tolerance_wide = period * 0.03
-            consistent_wide = (residual < tolerance_wide) | (residual > period - tolerance_wide)
-            new_candidates = t_candidates[consistent_wide]
+            # No candidates survived — this pulsar's timing is inconsistent
+            # with the surviving window (ISM noise pushed it out of band).
+            # Skip the pulsar rather than widening the tolerance: a widened
+            # band admits wrong-period aliases that poison every subsequent
+            # CRT intersection, silently corrupting the resolved offset.
             logger.warning(
-                "Stage 4: Pulsar %s: no candidates in tight window; widened to %.1f%% of period.",
-                pulsar.name, 100 * tolerance_wide / period,
+                "Stage 4: Pulsar %s inconsistent with current window — "
+                "skipping (no tolerance widening).", pulsar.name,
             )
+            window_history.append((
+                step_idx,
+                float(t_candidates[-1] - t_candidates[0])
+                if len(t_candidates) > 1 else grid_step / 2.0,
+            ))
+            continue
 
         if len(new_candidates) > 0:
             t_candidates = new_candidates

@@ -351,6 +351,21 @@ def _ensure_catalogue_and_ism(settings: dict) -> bool:
 
         st.session_state.ism = ism
 
+    # Surface a mismatch between the tier's requested grid resolution and
+    # what the loaded (bundled) grid actually provides — regenerating the
+    # grid requires pygedm, so we inform rather than silently recompute.
+    ism = st.session_state.ism
+    if ism is not None and ism.grid_loaded():
+        actual_res = ism.resolution_pc
+        if np.isfinite(actual_res) and actual_res > grid_res_pc * 1.5:
+            st.info(
+                f"Bundled DM grid resolution is {actual_res:.0f} pc; the "
+                f"{settings['tier']} tier requests {grid_res_pc} pc. "
+                "Position accuracy is limited by the bundled grid — install "
+                "pygedm and delete data/ne2001_grid.npz to regenerate it "
+                "at full resolution."
+            )
+
     return True
 
 
@@ -670,9 +685,17 @@ def _run_one_phase5_pipeline(settings: dict) -> None:
             logger.warning("Stage 4 skipped: no pulsars identified by Stage 2.")
             st.session_state.stage_status["stage4"] = "skipped"
         else:
-            arrival_times = {p.name: obs_timings[p.name]["total"]
-                             for p in identified_pulsars
-                             if p.name in obs_timings}
+            # Stage 4 operates on post-position-fix phase residuals: raw
+            # arrival totals contain ~1e11 s of Roemer delay, and phase
+            # ambiguity is only resolvable once position is known to ~c×P
+            # (a few hundred km) — far beyond the filter's kpc-scale fix.
+            # We therefore feed it clock-only residuals (the documented
+            # illustrative regime, same as the Phase 4 tests).
+            arrival_times = stage4_phase_ambiguity.simulate_arrival_times(
+                identified_pulsars,
+                clock_offset_s=sc.clock_offset_s,
+                seed=42 + step,
+            )
             try:
                 s4_result = stage4_phase_ambiguity.run(
                     identified_pulsars,

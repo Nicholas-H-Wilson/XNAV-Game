@@ -91,7 +91,28 @@ def run(
 
     particle_positions = particle_filter.particles[:, :3]   # (N, 3) kpc
 
-    # ── 1. Compute geometric weight update ───────────────────────────────────
+    # ── 1. Compute GDOP first ─────────────────────────────────────────────────
+    # Degenerate geometry (< 4 pulsars or coplanar directions) means the LOS
+    # constraint is ill-posed; applying the weight update anyway would bias
+    # the filter along the unconstrained directions, so skip it entirely.
+    gdop, gdop_label = _compute_gdop(identified_pulsars)
+    psr_pos_arr = np.array([p.position_kpc for p in identified_pulsars])
+    baseline_kpc = float(np.std(np.linalg.norm(psr_pos_arr, axis=1)))
+    if not np.isfinite(gdop):
+        logger.warning(
+            "Stage 3: GDOP undefined (%s) — skipping geometric weight update.",
+            gdop_label,
+        )
+        return {
+            "updated_filter": particle_filter,
+            "gdop": gdop,
+            "gdop_label": gdop_label,
+            "n_pulsars_used": len(identified_pulsars),
+            "los_weights": np.ones(particle_filter.n_particles),
+            "baseline_kpc": baseline_kpc,
+        }
+
+    # ── 2. Compute geometric weight update ────────────────────────────────────
     # For each identified pulsar, compute perpendicular distance of each particle
     # from the pulsar's line-of-sight ray.  Accumulate as a log-weight update.
     #
@@ -131,17 +152,10 @@ def run(
     else:
         logger.warning("Stage 3: geometric weight update collapsed; retaining prior weights.")
 
-    # ── 2. Compute GDOP ──────────────────────────────────────────────────────
-    gdop, gdop_label = _compute_gdop(identified_pulsars)
-
     logger.info(
         "Stage 3: GDOP=%.2f (%s), %d pulsars used",
         gdop, gdop_label, len(identified_pulsars),
     )
-
-    # Characteristic spread: std dev of pulsar distances from weighted centroid
-    psr_pos_arr = np.array([p.position_kpc for p in identified_pulsars])
-    baseline_kpc = float(np.std(np.linalg.norm(psr_pos_arr, axis=1)))
 
     return {
         "updated_filter": particle_filter,

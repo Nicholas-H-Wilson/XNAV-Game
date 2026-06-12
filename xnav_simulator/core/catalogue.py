@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -174,9 +175,14 @@ class Catalogue:
                 "pulsars": top100,
             }
 
+            # Atomic write: dump to a sibling temp file, then rename over the
+            # cache.  A crash or network failure mid-write can therefore never
+            # leave a truncated/corrupt cache for subsequent sessions.
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._cache_path, "w") as fh:
+            tmp_path = self._cache_path.with_suffix(".json.tmp")
+            with open(tmp_path, "w") as fh:
                 json.dump(cache_data, fh, indent=2)
+            os.replace(tmp_path, self._cache_path)
 
             self._load()  # reload from newly written cache
             logger.info("Cache refreshed: %d pulsars written.", len(top100))

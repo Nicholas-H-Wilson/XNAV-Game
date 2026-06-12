@@ -145,15 +145,15 @@ def run(
         path_lengths = np.linalg.norm(diff, axis=2).ravel()                 # (N*P,)
         predicted_dm = np.maximum(mean_density * path_lengths, 0.5)         # (N*P,)
     else:
-        # APPROXIMATION: Without ISM grid use catalogue DM values as the predicted
-        # DM for every grid point.  This provides no spatial discrimination —
-        # all grid points get equal likelihood.  The map will be uniform and the
-        # particle filter will be initialised from a roughly uniform prior.
-        # This is acceptable for testing; for real runs the DM grid is required.
-        predicted_dm = np.tile(
-            np.array([p.dm for p in active_pulsars], dtype=np.float64),
-            n_grid,
-        )   # (N*P,) — constant per pulsar, repeated N times
+        # Without the ISM grid, catalogue DMs are position-invariant: every
+        # grid point would get identical likelihood and the "localisation"
+        # map would be uniform noise dressed up as a result.  Fail loudly —
+        # the caller can fall back to a region prior and surface the failure.
+        raise RuntimeError(
+            "Stage 1 DM localisation requires a loaded ISM DM grid; "
+            "catalogue DMs carry no position signal. Ensure "
+            "data/ne2001_grid.npz exists or call ism.precompute_grid()."
+        )
 
     predicted_dm = predicted_dm.reshape(n_grid, len(active_pulsars))   # (N,P)
 

@@ -169,11 +169,13 @@ def run_one(seed: int, pulsars, ism, tier_cfg: dict,
                 except Exception:
                     pass
 
-        # Stage 4 (step 6)
+        # Stage 4 (step 6) — clock-only phase residuals; see app.py stage-4
+        # block for why raw arrival totals cannot resolve phase ambiguity.
         if step == 6 and id_pulsars:
             try:
-                arrival_times = {p.name: obs_timings[p.name]["total"]
-                                 for p in id_pulsars if p.name in obs_timings}
+                arrival_times = stage4_phase_ambiguity.simulate_arrival_times(
+                    id_pulsars, clock_offset_s=sc.clock_offset_s, seed=seed + step,
+                )
                 stage4_phase_ambiguity.run(
                     id_pulsars, arrival_times, pf.get_estimate()["position_kpc"],
                     true_clock_offset_s=sc.clock_offset_s,
