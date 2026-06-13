@@ -375,7 +375,7 @@ def _ensure_catalogue_and_ism(settings: dict) -> bool:
 def _load_star_catalogue() -> list:
     """Local HYG star subset for the galaxy map (see tools/curate_hyg_stars.py).
 
-    3000 stars: every proper-named star plus the brightest others, with
+    ~30,000 stars: every proper-named star plus the brightest others, with
     galactocentric positions, spectral types and derived T_eff. Cached
     process-wide — the file is static.
     """
@@ -386,6 +386,21 @@ def _load_star_catalogue() -> list:
             return json.load(fh)["stars"]
     except Exception as exc:
         logger.warning("Star catalogue unavailable (%s); map shows pulsars only.", exc)
+        return []
+
+
+@st.cache_data(show_spinner=False)
+def _load_galactic_objects() -> list:
+    """Distributed galaxy-wide objects for the map (globulars, nebulae, black
+    holes, clusters). See tools/curate_galactic_objects.py. Cached process-wide.
+    """
+    import json
+    path = config.DATA_DIR / "galactic_objects.json"
+    try:
+        with open(path) as fh:
+            return json.load(fh)["objects"]
+    except Exception as exc:
+        logger.warning("Galactic-objects catalogue unavailable (%s).", exc)
         return []
 
 
@@ -489,6 +504,11 @@ def _build_sim_data(settings: dict) -> dict:
         "uncertainty_kpc": uncertainty,
         "blind_mode": blind_mode,
         "stars": _load_star_catalogue(),
+        "galactic_objects": _load_galactic_objects(),
+        # Level-of-detail: render the full faint-star field only when idle, so
+        # the per-iteration run loop stays fast (bright stars + distributed
+        # objects + main markers are always shown).
+        "full_detail": not st.session_state.running,
         "particle_pos": particles_kpc if pf is not None and pf.initialised else None,
         "particle_weights": weights if pf is not None and pf.initialised else None,
         # Convergence panel

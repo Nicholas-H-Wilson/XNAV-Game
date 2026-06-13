@@ -323,6 +323,100 @@ def _star_customdata(s: dict) -> list:
     ]
 
 
+# ── Object (globular / nebula / black hole) styling and popups ────────────────
+
+_OBJECT_STYLE = {
+    # kind: (colour, marker size, symbol, legend label)
+    "blackhole": ("#FF4D6D", 9, "circle", "Black hole"),
+    "globular":  ("#FFE08A", 6, "circle", "Globular cluster"),
+    "nebula":    ("#7DF5C0", 8, "circle", "Nebula"),
+    "snr":       ("#C792EA", 8, "circle", "Supernova remnant"),
+    "cloud":     ("#6FB3FF", 8, "circle", "Molecular cloud"),
+    "cluster":   ("#BFE3FF", 6, "circle", "Open cluster"),
+    "exotic":    ("#FFB347", 8, "circle", "Exotic star"),
+    "galaxy":    ("#E6C2FF", 7, "circle", "Satellite galaxy"),
+}
+
+_OBJECT_HOVER = (
+    "<b>%{customdata[0]}</b><br>"
+    "%{customdata[1]}<br>"
+    "─────────────────<br>"
+    "%{customdata[2]}<br>"
+    "Distance from Sun  %{customdata[3]}<br>"
+    "Galactic l, b      %{customdata[4]}"
+    "<extra></extra>"
+)
+
+
+def _object_customdata(o: dict) -> list:
+    label = _OBJECT_STYLE.get(o.get("kind", ""), ("", 0, "", o.get("kind", "object")))[3]
+    d = o.get("d_kpc", 0.0)
+    dist = _fmt_kpc(d) if d < 1.0 else f"{d:.1f} kpc ({d * 3.262:.0f} kly)"
+    return [
+        o.get("name", "?"),
+        label,
+        o.get("desc", ""),
+        dist,
+        f"{o.get('gl', 0.0):.1f}°, {o.get('gb', 0.0):.1f}°",
+    ]
+
+
+# Memoised per-process render arrays — the catalogues are static, so the heavy
+# per-point formatting (30k stars) runs once and is reused on every rerun.
+_STAR_CACHE: dict = {}
+_OBJ_CACHE: dict = {}
+
+
+def _star_render_data(stars: list) -> dict:
+    """Split stars into a bright tier (full cards) and faint tier (dense field).
+
+    Returns numpy arrays + customdata lists, keyed/cached on catalogue size.
+    """
+    key = len(stars)
+    if key in _STAR_CACHE:
+        return _STAR_CACHE[key]
+
+    mags = np.array([s.get("mag", 6.0) for s in stars], dtype=float)
+    xs = np.array([s["x_kpc"] for s in stars], dtype=float)
+    ys = np.array([s["y_kpc"] for s in stars], dtype=float)
+    sizes = np.clip(4.6 - 0.55 * mags, 1.3, 6.5)
+
+    # Brightest ~4000 carry full hover cards; the rest form the faint field.
+    n_bright = min(4000, len(stars))
+    order = np.argsort(mags)
+    bright_idx = order[:n_bright]
+    faint_idx = order[n_bright:]
+
+    bright_cd = [_star_customdata(stars[i]) for i in bright_idx]
+    faint_cd = [[stars[i].get("name", "?"),
+                 f"{stars[i].get('d_pc', 0.0):.1f} pc"] for i in faint_idx]
+
+    out = {
+        "bright": dict(x=xs[bright_idx], y=ys[bright_idx],
+                       size=sizes[bright_idx], cd=bright_cd),
+        "faint": dict(x=xs[faint_idx], y=ys[faint_idx],
+                      size=sizes[faint_idx], cd=faint_cd),
+    }
+    _STAR_CACHE[key] = out
+    return out
+
+
+def _object_render_data(objects: list) -> dict:
+    """Group distributed objects by kind into render arrays (cached)."""
+    key = len(objects)
+    if key in _OBJ_CACHE:
+        return _OBJ_CACHE[key]
+    groups: dict[str, dict] = {}
+    for o in objects:
+        kind = o.get("kind", "globular")
+        g = groups.setdefault(kind, {"x": [], "y": [], "cd": []})
+        g["x"].append(o.get("x_kpc", 0.0))
+        g["y"].append(o.get("y_kpc", 0.0))
+        g["cd"].append(_object_customdata(o))
+    _OBJ_CACHE[key] = groups
+    return groups
+
+
 # ── Main figure builders ──────────────────────────────────────────────────────
 
 def build_topdown_figure(data: dict) -> go.Figure:
@@ -353,25 +447,70 @@ def build_topdown_figure(data: dict) -> go.Figure:
         name="_disk_boundary",
     ))
 
+    full_detail = data.get("full_detail", True)
+
     # Catalogued stars — points of light, every one tappable for its data card.
-    # All real stars sit within ~1 kpc of the Sun: a bright clump at full
-    # zoom that resolves into the named solar neighbourhood as you zoom in.
+    # All real (parallax-measured) stars sit within ~1 kpc of the Sun: a bright
+    # knot at galaxy zoom that resolves into the named solar neighbourhood as
+    # you zoom in. Rendered in two tiers for performance:
+    #   faint field (~26k) — shown only at full detail (idle), light hover
+    #   bright tier (~4k)  — always shown, full data cards
+    # Both star tiers render only at full detail (idle): the catalogue never
+    # changes during a run, so rebuilding 30k points every filter iteration is
+    # wasted work (all tabs rebuild each Streamlit rerun). During a run the map
+    # keeps the cheap distributed objects + navigation markers; the full star
+    # field repopulates the instant the run completes.
     stars = data.get("stars", [])
-    if stars:
-        mags = np.array([s.get("mag", 6.0) for s in stars])
-        # Brighter star → larger point of light (apparent mag −1.5 … 6)
-        sizes = np.clip(4.6 - 0.55 * mags, 1.4, 6.5)
+    if stars and full_detail:
+        sr = _star_render_data(stars)
+        f = sr["faint"]
+        if len(f["x"]):
+            fig.add_trace(go.Scattergl(
+                x=f["x"], y=f["y"],
+                mode="markers",
+                marker=dict(size=np.maximum(f["size"], 1.8),
+                            color="rgba(228,235,255,0.70)",
+                            line=dict(width=0)),
+                customdata=f["cd"],
+                hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>",
+                showlegend=False,
+                name="_faint_stars",
+            ))
+        b = sr["bright"]
         fig.add_trace(go.Scattergl(
-            x=[s["x_kpc"] for s in stars],
-            y=[s["y_kpc"] for s in stars],
+            x=b["x"], y=b["y"],
             mode="markers",
-            marker=dict(size=sizes, color="rgba(235,240,255,0.85)",
+            marker=dict(size=b["size"], color="rgba(240,244,255,0.92)",
                         line=dict(width=0)),
-            customdata=[_star_customdata(s) for s in stars],
+            customdata=b["cd"],
             hovertemplate=_STAR_HOVER,
             showlegend=False,
             name="Catalogued stars",
         ))
+
+    # Distributed galactic objects — globular clusters (halo-wide), nebulae,
+    # molecular clouds, supernova remnants, black holes. These give genuine
+    # galaxy-wide clickable coverage and are ALWAYS shown (small count).
+    objects = data.get("galactic_objects", [])
+    if objects:
+        groups = _object_render_data(objects)
+        for kind, g in groups.items():
+            colour, size, symbol, label = _OBJECT_STYLE.get(
+                kind, ("#FFFFFF", 6, "circle", kind))
+            # Soft halo so objects read against the bright star field
+            fig.add_trace(go.Scattergl(
+                x=g["x"], y=g["y"], mode="markers",
+                marker=dict(size=size + 6, color=colour, opacity=0.18,
+                            line=dict(width=0)),
+                hoverinfo="skip", showlegend=False, name=f"_{kind}_halo",
+            ))
+            fig.add_trace(go.Scattergl(
+                x=g["x"], y=g["y"], mode="markers",
+                marker=dict(size=size, color=colour, opacity=0.95,
+                            line=dict(width=0)),
+                customdata=g["cd"], hovertemplate=_OBJECT_HOVER,
+                showlegend=True, name=label,
+            ))
 
     # Pulsars — points of light: soft halo + bright pinpoint core
     if pulsars:
@@ -551,10 +690,12 @@ def _finalise_topdown_layout(fig: go.Figure) -> None:
         yaxis=dict(**_AXIS_STYLE, title="Y (kpc)", range=[-ext, ext],
                    scaleanchor="x", scaleratio=1),
         # Horizontal legend below the plot — inside the axes it covers the
-        # galaxy on phone-width viewports.
+        # galaxy on phone-width viewports. Compact font: the object colour key
+        # has many entries (tap an entry to toggle that layer).
         legend=dict(bgcolor="rgba(0,0,0,0.5)", orientation="h",
-                    x=0.5, xanchor="center", y=-0.18, font=dict(size=10)),
-        height=460,
+                    x=0.5, xanchor="center", y=-0.16, font=dict(size=8),
+                    itemwidth=30),
+        height=470,
         dragmode="pan",
         # Preserve the user's zoom/pan across Streamlit reruns (e.g. while
         # the filter iterates) — without this every rerun resets the view.

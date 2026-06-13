@@ -83,7 +83,7 @@ def _display_name(row: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("csv_path")
-    ap.add_argument("--n", type=int, default=3000,
+    ap.add_argument("--n", type=int, default=30000,
                     help="total stars to keep (named stars always included)")
     args = ap.parse_args()
 

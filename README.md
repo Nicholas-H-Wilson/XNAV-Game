@@ -33,12 +33,23 @@ spacecraft's galactic position, converging from ~15 kpc uncertainty to sub-kpc a
   pulsars show spin period, characteristic age, surface magnetic field, spin-down
   luminosity, distance, DM, and flux; the Sun shows its stellar class, age, and
   effective temperature
-- **3,000 catalogued stars** — every proper-named star plus the brightest of the
+- **30,000 catalogued stars** — every proper-named star plus the brightest of the
   HYG database (Hipparcos/Yale/Gliese) is on the map as a tappable point of light
   with spectral type, effective temperature, distance, luminosity, and magnitudes;
-  zoom into the Sun to resolve the solar neighbourhood. Bundled locally
-  (`data/hyg_stars.json`, regenerable via `tools/curate_hyg_stars.py`) — no
-  online lookups needed
+  zoom into the Sun to resolve the solar neighbourhood. (Real parallax-measured
+  stars all lie within ~1 kpc of the Sun, so they form a dense knot at Sol that
+  resolves on zoom — that clustering is physically accurate.) Bundled locally
+  (`data/hyg_stars.json`, regenerable via `tools/curate_hyg_stars.py`)
+- **Galaxy-wide objects** — 184 distributed, tappable objects give coverage across
+  the whole disk and halo: 157 globular clusters (Harris 1996, 2010 ed.), plus
+  curated nebulae, molecular clouds, supernova remnants, open clusters and black
+  holes (Sagittarius A* and stellar-mass X-ray binaries like Cygnus X-1). Each
+  card names the object, its class, distance and galactic coordinates. Bundled in
+  `data/galactic_objects.json` (`tools/curate_galactic_objects.py`)
+- **Level-of-detail rendering** — the full 30k-star field draws when the map is
+  idle; during an active simulation only the distributed objects and navigation
+  markers (spacecraft estimate, pulsars, true position) render, so the per-iteration
+  filter loop stays fast. Main markers are always visible
 - **Pulsar sky map** — all active pulsars in galactic coordinates (GL/GB), colour-coded by timing
   noise; identified pulsars highlighted
 - **3D particle cloud** — full Liu-West posterior in 3D galactocentric space with playback scrubber
