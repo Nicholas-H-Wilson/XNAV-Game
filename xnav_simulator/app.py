@@ -390,6 +390,66 @@ def _load_star_catalogue() -> list:
 
 
 @st.cache_data(show_spinner=False)
+def _load_gaia_stars() -> dict:
+    """200k Gaia DR3 stars spread across the disk (tools/curate_gaia_stars.py).
+
+    Returns numeric arrays for the bulk visual field (no per-point hover — that
+    payload is what makes 200k points slow) plus a smaller *clickable* subset of
+    the most luminous stars (giants/supergiants visible across the disk), which
+    carry hover cards. Cached process-wide; gated to idle so it never rebuilds
+    during a run. ~4.7 MB compressed.
+    """
+    import numpy as np
+    path = config.DATA_DIR / "gaia_stars.npz"
+    try:
+        d = np.load(path)
+    except Exception as exc:
+        logger.warning("Gaia star field unavailable (%s).", exc)
+        return {}
+
+    x, y = d["x_kpc"], d["y_kpc"]
+    teff = d["teff_k"]
+    dist_pc = d["dist_pc"]
+    mag = d["mag"]
+    bp_rp = d["bp_rp"]
+
+    # Absolute magnitude → pick the intrinsically luminous, distant stars as the
+    # clickable subset (these are the "star info across the galaxy" the field is
+    # for). Cap to keep the hover payload small.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        absmag = mag - 5.0 * np.log10(np.maximum(dist_pc, 1.0)) + 5.0
+    clickable = np.nonzero((absmag < -1.5) & (dist_pc > 1500))[0]
+    if len(clickable) > 18000:
+        # keep the most luminous
+        order = np.argsort(absmag[clickable])[:18000]
+        clickable = clickable[order]
+
+    def _cls(t: float) -> str:
+        if t <= 0:
+            return "star"
+        for lim, name in ((3700, "M-type (red)"), (5200, "K-type (orange)"),
+                          (6000, "G-type (yellow)"), (7500, "F-type"),
+                          (10000, "A-type (white)"), (30000, "B-type (blue)")):
+            if t < lim:
+                return name
+        return "O-type (blue)"
+
+    hover = []
+    for i in clickable:
+        dk = dist_pc[i] / 1000.0
+        dstr = f"{dist_pc[i]:.0f} pc" if dk < 1 else f"{dk:.1f} kpc ({dk*3.262:.0f} kly)"
+        tstr = f"{teff[i]:,.0f} K" if teff[i] > 0 else "T_eff n/a"
+        hover.append(f"<b>Gaia DR3 star</b><br>{_cls(teff[i])} luminous giant<br>"
+                     f"T_eff {tstr}<br>Distance {dstr}<br>G mag {mag[i]:.1f}")
+
+    return {
+        "x": x, "y": y, "mag": mag, "bp_rp": bp_rp,
+        "click_x": x[clickable], "click_y": y[clickable],
+        "click_bp_rp": bp_rp[clickable], "click_hover": hover,
+    }
+
+
+@st.cache_data(show_spinner=False)
 def _load_galactic_objects() -> list:
     """Distributed galaxy-wide objects for the map (globulars, nebulae, black
     holes, clusters). See tools/curate_galactic_objects.py. Cached process-wide.
@@ -448,14 +508,18 @@ def _build_sim_data(settings: dict) -> dict:
         except Exception:
             pass
 
-    # Build pulsar dicts for UI panels
-    pulsar_dicts = []
+    # Build pulsar dicts for UI panels. The map shows the FULL catalogue so the
+    # active navigation set (those actually feeding the particle filter this
+    # run) can light up green against the dim rest. Other panels use the active
+    # subset via data["pulsars"].
     stage2_res = st.session_state.stage_results.get("stage2", {})
     identifications = stage2_res.get("identifications", [])
     # best_match holds Pulsar objects (or None) — see stage2 docstring
     id_names = {r["best_match"].name for r in identifications
                 if r.get("best_match") is not None}
-    for p in pulsars:
+    active_names = {p.name for p in pulsars}
+
+    def _pulsar_dict(p, in_use: bool) -> dict:
         ident = p.name in id_names
         conf = next((r.get("confidence", 0.0) for r in identifications
                      if r.get("best_match") is not None
@@ -466,11 +530,11 @@ def _build_sim_data(settings: dict) -> dict:
         b_surf_g = 3.2e19 * float(np.sqrt(p.period * pdot)) if pdot > 0 else 0.0
         edot_erg_s = 3.95e46 * pdot / (p.period ** 3) if pdot > 0 else 0.0
         ppos = p.position_kpc
-        pulsar_dicts.append({
+        return {
             "name": p.name, "dm": p.dm, "period": p.period,
             "distance_kpc": p.distance_kpc, "gl": p.gl, "gb": p.gb,
             "timing_noise_ns": p.timing_noise_ns, "w50": p.w50,
-            "identified": ident, "confidence": conf,
+            "identified": ident, "confidence": conf, "in_use": in_use,
             # Map sprite data
             "x_kpc": float(ppos[0]), "y_kpc": float(ppos[1]), "z_kpc": float(ppos[2]),
             "period_dot": p.period_dot,
@@ -483,7 +547,17 @@ def _build_sim_data(settings: dict) -> dict:
             # Timing contributions (populated from observed_timings if available)
             **_pulsar_timing_contributions(p, st.session_state.observed_timings,
                                            settings),
-        })
+        }
+
+    pulsar_dicts = [_pulsar_dict(p, in_use=True) for p in pulsars]
+
+    # Full-catalogue pulsars not in the active set → dim "catalogue" markers
+    all_pulsar_dicts = list(pulsar_dicts)
+    cat = st.session_state.catalogue
+    if cat is not None:
+        for p in cat.all_pulsars:
+            if p.name not in active_names:
+                all_pulsar_dicts.append(_pulsar_dict(p, in_use=False))
 
     # Stage 4 results
     s4_res = st.session_state.stage_results.get("stage4", {})
@@ -498,12 +572,14 @@ def _build_sim_data(settings: dict) -> dict:
     return {
         # Galaxy map
         "pulsars": pulsar_dicts,
+        "all_pulsars": all_pulsar_dicts,
         "sc_pos_kpc": pos_est,
         "true_pos_kpc": true_pos,
         "sun_pos_kpc": SUN_POS_KPC,
         "uncertainty_kpc": uncertainty,
         "blind_mode": blind_mode,
         "stars": _load_star_catalogue(),
+        "gaia_stars": _load_gaia_stars(),
         "galactic_objects": _load_galactic_objects(),
         # Level-of-detail: render the full faint-star field only when idle, so
         # the per-iteration run loop stays fast (bright stars + distributed

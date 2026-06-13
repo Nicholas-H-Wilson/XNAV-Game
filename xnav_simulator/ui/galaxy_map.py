@@ -58,6 +58,11 @@ _HOVERLABEL = dict(
 
 _MAP_EXTENT_KPC = 16.0
 
+# How many of the bundled Gaia stars to draw in the bulk visual field. The full
+# set stays bundled; rendering a representative subsample keeps the phone-side
+# render fast (the user-endorsed "fewer points when zoomed out").
+_GAIA_FIELD_RENDER = 100000
+
 
 def _fmt_kpc(value: float) -> str:
     """Format a kpc quantity, switching to parsecs below 0.1 kpc."""
@@ -449,6 +454,40 @@ def build_topdown_figure(data: dict) -> go.Figure:
 
     full_detail = data.get("full_detail", True)
 
+    # Gaia DR3 field — 200k real stars spread across the disk (out to ~12 kpc),
+    # coloured by BP-RP (blue=hot, red=cool), tappable for class/T_eff/distance.
+    # This is the galaxy-wide coverage layer. Gated to idle (full_detail) like
+    # the HYG tiers so the run loop stays fast.
+    _GAIA_SCALE = [[0.0, "#cfe0ff"], [0.25, "#eef3ff"], [0.5, "#fff6e0"],
+                   [0.75, "#ffd9a0"], [1.0, "#ff9d6e"]]  # BP-RP: blue/hot→red/cool
+    gaia = data.get("gaia_stars") or {}
+    if full_detail and len(gaia.get("x", [])):
+        # Bulk field — numeric arrays only, NO per-point hover and a scalar size
+        # (per-point arrays are what make 200k points slow to ship). The curated
+        # set is pre-shuffled, so a slice is a representative subsample that
+        # preserves the disk spread while halving the payload — the user-endorsed
+        # "render fewer when zoomed out" LOD.
+        gx = np.asarray(gaia["x"]); gy = np.asarray(gaia["y"])
+        gc = np.asarray(gaia["bp_rp"])
+        n_render = min(len(gx), _GAIA_FIELD_RENDER)
+        fig.add_trace(go.Scattergl(
+            x=gx[:n_render], y=gy[:n_render], mode="markers",
+            marker=dict(size=1.7, color=gc[:n_render], colorscale=_GAIA_SCALE,
+                        cmin=-0.2, cmax=3.0, showscale=False,
+                        opacity=0.72, line=dict(width=0)),
+            hoverinfo="skip", showlegend=False, name="_gaia_field",
+        ))
+        # Clickable luminous subset (giants/supergiants across the disk)
+        if len(gaia.get("click_x", [])):
+            fig.add_trace(go.Scattergl(
+                x=gaia["click_x"], y=gaia["click_y"], mode="markers",
+                marker=dict(size=3.2, color=gaia["click_bp_rp"],
+                            colorscale=_GAIA_SCALE, cmin=-0.2, cmax=3.0,
+                            showscale=False, opacity=0.9, line=dict(width=0)),
+                text=gaia["click_hover"], hovertemplate="%{text}<extra></extra>",
+                showlegend=False, name="_gaia_luminous",
+            ))
+
     # Catalogued stars — points of light, every one tappable for its data card.
     # All real (parallax-measured) stars sit within ~1 kpc of the Sun: a bright
     # knot at galaxy zoom that resolves into the named solar neighbourhood as
@@ -461,10 +500,13 @@ def build_topdown_figure(data: dict) -> go.Figure:
     # keeps the cheap distributed objects + navigation markers; the full star
     # field repopulates the instant the run completes.
     stars = data.get("stars", [])
+    has_gaia = bool(len(gaia.get("x", [])))
     if stars and full_detail:
         sr = _star_render_data(stars)
         f = sr["faint"]
-        if len(f["x"]):
+        # The HYG faint tier (~26k) is redundant once the 200k Gaia field is
+        # present — skip it to cut payload; keep the named/bright HYG tier.
+        if len(f["x"]) and not has_gaia:
             fig.add_trace(go.Scattergl(
                 x=f["x"], y=f["y"],
                 mode="markers",
@@ -512,61 +554,59 @@ def build_topdown_figure(data: dict) -> go.Figure:
                 showlegend=True, name=label,
             ))
 
-    # Pulsars — points of light: soft halo + bright pinpoint core
-    if pulsars:
-        px, py, cdata, ident_x, ident_y = [], [], [], [], []
-        pdms = []
-        for p in pulsars:
+    # Pulsars — always visible (never gated by detail level). The full pulsar
+    # catalogue shows as dim blue-white points; the active navigation set (the
+    # pulsars actually feeding the particle filter this run) lights up bright
+    # GREEN to show obviously which ones are navigating. Both stay tappable.
+    pulsar_list = data.get("all_pulsars") or pulsars
+    if pulsar_list:
+        used_x, used_y, used_cd = [], [], []
+        idle_x, idle_y, idle_cd = [], [], []
+        for p in pulsar_list:
             x = p.get("x_kpc")
             y = p.get("y_kpc")
             if x is None or y is None:
                 x, y = _fallback_xy(p)
-            px.append(x)
-            py.append(y)
-            pdms.append(p.get("dm", 0.0))
-            cdata.append(_pulsar_customdata(p))
-            if p.get("identified", False):
-                ident_x.append(x)
-                ident_y.append(y)
+            cd = _pulsar_customdata(p)
+            if p.get("in_use", False):
+                used_x.append(x); used_y.append(y); used_cd.append(cd)
+            else:
+                idle_x.append(x); idle_y.append(y); idle_cd.append(cd)
 
-        # Soft glow halo (non-interactive)
-        fig.add_trace(go.Scatter(
-            x=px, y=py,
-            mode="markers",
-            marker=dict(size=10, color="rgba(150,205,255,0.22)", symbol="circle",
-                        line=dict(width=0)),
-            hoverinfo="skip",
-            showlegend=False,
-            name="_pulsar_halo",
-        ))
-        # Pinpoint core — DM-tinted point of light (no symbol shapes)
-        fig.add_trace(go.Scatter(
-            x=px, y=py,
-            mode="markers",
-            marker=dict(
-                size=3.6,
-                color=pdms,
-                colorscale=[[0.0, "#cfe4ff"], [0.5, "#ffffff"], [1.0, "#fff3cf"]],
-                showscale=False,
-                symbol="circle",
-                line=dict(width=0),
-                opacity=1.0,
-            ),
-            customdata=cdata,
-            hovertemplate=_PULSAR_HOVER,
-            showlegend=False,
-            name="Pulsars",
-        ))
-        # Identification rings — thin and faint, just enough to read
-        if ident_x:
+        # Idle (not yet acquired) pulsars: blue-white points of light
+        if idle_x:
             fig.add_trace(go.Scatter(
-                x=ident_x, y=ident_y,
-                mode="markers",
-                marker=dict(size=12, color="rgba(0,0,0,0)", symbol="circle-open",
-                            line=dict(width=1, color="rgba(0,212,255,0.75)")),
-                hoverinfo="skip",
-                showlegend=True,
-                name="Identified pulsar",
+                x=idle_x, y=idle_y, mode="markers",
+                marker=dict(size=9, color="rgba(150,205,255,0.20)",
+                            symbol="circle", line=dict(width=0)),
+                hoverinfo="skip", showlegend=False, name="_pulsar_halo",
+            ))
+            fig.add_trace(go.Scatter(
+                x=idle_x, y=idle_y, mode="markers",
+                marker=dict(size=4.4, color="#bcd8ff", symbol="circle",
+                            line=dict(width=0), opacity=0.95),
+                customdata=idle_cd, hovertemplate=_PULSAR_HOVER,
+                showlegend=True, name="Pulsar (catalogue)",
+            ))
+
+        # In-use pulsars: bright green glow + core + ring — obvious "navigating"
+        if used_x:
+            for size, alpha in ((26, 0.14), (16, 0.28)):
+                fig.add_trace(go.Scatter(
+                    x=used_x, y=used_y, mode="markers",
+                    marker=dict(size=size, color=f"rgba(0,255,120,{alpha})",
+                                symbol="circle", line=dict(width=0)),
+                    hoverinfo="skip", showlegend=False, name="_pulsar_used_glow",
+                ))
+            fig.add_trace(go.Scatter(
+                x=used_x, y=used_y, mode="markers",
+                marker=dict(size=8.5, color="#26FF8A", symbol="circle",
+                            line=dict(width=1.2, color="#CFFFE4")),
+                customdata=used_cd,
+                hovertemplate=_PULSAR_HOVER.replace(
+                    "<extra></extra>",
+                    "<br><b style='color:#26FF8A'>● IN USE — navigating</b><extra></extra>"),
+                showlegend=True, name="Pulsar in use (navigating)",
             ))
 
     # Particle cloud (subsampled to top-500 by weight for rendering performance)

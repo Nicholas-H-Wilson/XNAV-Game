@@ -245,28 +245,31 @@ def test_convergence_ess_pre():
 
 # ── Test 7: galaxy map renders pulsars with DM colouring ─────────────────────
 
-@_test("galaxy map renders pulsar scatter coloured by DM")
+@_test("galaxy map lights up in-use pulsars green, rest dim")
 def test_galaxy_map_pulsars():
     from ui.galaxy_map import build_topdown_figure
 
+    # 3 active (in_use) navigation pulsars + 5 catalogue pulsars
     pulsars = [
         {"name": f"J{i:04d}+0000", "gl": float(i * 30), "gb": 0.0,
-         "distance_kpc": 2.0, "dm": float(10 + i * 5),
-         "timing_noise_ns": 100.0, "identified": i % 2 == 0, "confidence": 0.8}
+         "distance_kpc": 2.0, "dm": float(10 + i * 5), "period": 0.004,
+         "timing_noise_ns": 100.0, "identified": i < 3, "confidence": 0.8,
+         "in_use": i < 3}
         for i in range(8)
     ]
-    data = _make_data(pulsars=pulsars)
+    data = _make_data(all_pulsars=pulsars)
     fig = build_topdown_figure(data)
 
-    # Find the pulsar scatter trace (has colorscale)
-    pulsar_traces = [t for t in fig.data
-                     if hasattr(t, "marker") and
-                     hasattr(t.marker, "colorscale") and
-                     t.marker.colorscale is not None and
-                     len(t.marker.colorscale) > 0]
-    assert pulsar_traces, "No DM-coloured pulsar scatter trace found"
-    assert len(pulsar_traces[0].x) == 8, "Expected 8 pulsars in trace"
-    return "8 pulsars rendered with DM colour scale"
+    used = [t for t in fig.data if t.name == "Pulsar in use (navigating)"]
+    catalogue = [t for t in fig.data if t.name == "Pulsar (catalogue)"]
+    assert used, "No 'in use' (green) pulsar trace found"
+    assert len(used[0].x) == 3, f"Expected 3 in-use pulsars, got {len(used[0].x)}"
+    assert catalogue, "No catalogue pulsar trace found"
+    assert len(catalogue[0].x) == 5, f"Expected 5 catalogue pulsars, got {len(catalogue[0].x)}"
+    # In-use core must be green
+    assert "FF8A" in used[0].marker.color.upper() or "26FF" in used[0].marker.color.upper(), \
+        f"In-use pulsar not green: {used[0].marker.color}"
+    return "3 in-use pulsars green, 5 catalogue dim"
 
 
 # ── Test 8: phase panel ambiguity timeline shows exponential collapse ─────────
